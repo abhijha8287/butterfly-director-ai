@@ -11,6 +11,7 @@ from app.routers.v1 import (
     projects,
     prompt_history,
     stories,
+    story_architect,
     timelines,
 )
 
@@ -18,6 +19,7 @@ api_v1_router = APIRouter()
 api_v1_router.include_router(health.router)
 api_v1_router.include_router(projects.router)
 api_v1_router.include_router(stories.router)
+api_v1_router.include_router(story_architect.router)
 api_v1_router.include_router(timelines.router)
 api_v1_router.include_router(branches.router)
 api_v1_router.include_router(movies.router)

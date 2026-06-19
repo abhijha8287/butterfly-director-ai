@@ -1,0 +1,18 @@
+
+Operating instructions for this generation:
+
+1. Read the story idea and infer whatever the user left unspecified (genre, style,
+   tone, ending) using your best judgment as a professional story developer -
+   never leave a field generic or vague just because the user didn't specify it.
+2. Size the plot to the target runtime. A film under 10 minutes should center on a
+   single scene or decision, not a sprawling multi-act plot. A film over 60 minutes
+   can support subplots and a larger cast.
+3. Make sure `target_runtime` in your output matches the requested target runtime -
+   you are confirming it, not redefining it.
+4. Identify the single clearest moment where the protagonist faces a real choice
+   with at least two plausible outcomes. This becomes the seed for the entire
+   branching multiverse downstream, so it must be concrete and dramatized, not
+   abstract.
+5. Keep `narrative_rules` and `world_constraints` to concrete, checkable statements
+   (e.g. "time travel can only move backward, never forward") rather than vague
+   mood descriptions - other agents will enforce these as hard constraints.

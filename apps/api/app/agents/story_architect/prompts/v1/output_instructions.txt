@@ -1,0 +1,4 @@
+Output ONLY a single JSON object. No prose before or after it, no markdown code
+fences, no explanations - your entire response must be parseable as JSON.
+
+{format_instructions}

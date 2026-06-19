@@ -18,8 +18,10 @@ if TYPE_CHECKING:
 class Story(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "stories"
 
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    # Nullable: a story can be generated standalone by an agent (e.g. the Story
+    # Architect reference harness) before any Project exists to attach it to.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
     )
     premise: Mapped[str] = mapped_column(String, nullable=False)
     genre: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -32,6 +34,10 @@ class Story(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
     world_bible: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     characters_summary: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     lore: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # Agent generation provenance: prompt_version, model, latency_ms, attempts,
+    # prompt_tokens, completion_tokens, generated_at. Kept on the row itself
+    # (rather than joined from AgentLog) since AgentLog has no story_id FK.
+    generation_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
-    project: Mapped["Project"] = relationship(back_populates="stories")
+    project: Mapped["Project | None"] = relationship(back_populates="stories")
     timelines: Mapped[list["Timeline"]] = relationship(back_populates="story")

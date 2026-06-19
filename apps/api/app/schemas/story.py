@@ -29,7 +29,7 @@ class StoryRead(StoryBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None
     status: StoryStatus
     world_bible: dict
     characters_summary: dict
