@@ -28,7 +28,7 @@ class CharacterRead(CharacterBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None
     visual_reference_asset_id: uuid.UUID | None
     voice_profile: dict
     canonical_traits: dict

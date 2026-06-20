@@ -73,9 +73,16 @@ async def test_delete_soft_deletes_story(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_list_returns_generated_stories(db_session: AsyncSession) -> None:
     service = _service_with_mocked_agent(db_session, make_agent_run_result())
-    await service.generate(StoryRequest(prompt="A scientist discovers time travel.", target_runtime_minutes=10))
+    created = await service.generate(
+        StoryRequest(prompt="A scientist discovers time travel.", target_runtime_minutes=10)
+    )
 
     page = await service.list(cursor=None, limit=10)
 
+    # The DB also accumulates real rows from live demo/manual verification runs
+    # outside the test transaction, so only assert our own row is present and
+    # correct rather than asserting every row in an unfiltered list.
     assert len(page.items) >= 1
-    assert all(item.story_bible.title == "T" for item in page.items)
+    matching = [item for item in page.items if item.id == created.id]
+    assert len(matching) == 1
+    assert matching[0].story_bible.title == "T"

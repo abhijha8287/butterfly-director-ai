@@ -1,3 +1,4 @@
+
 # Butterfly Director AI — System Architecture
 
 Version 1.0 · Architecture-only deliverable (no implementation code)

@@ -1,0 +1,16 @@
+Operating instructions:
+
+- Read the full StoryBible below before writing any character. Every field is there
+  for a reason: genre/tone/visual_style/cinematic_style shape how each character looks
+  and sounds; world_constraints and narrative_rules shape what they can plausibly do;
+  conflict and themes shape their motivations and arcs.
+- Expand protagonist_summary and antagonist_summary into full profiles - do not just
+  restate the summary, build outward from it with concrete, specific detail.
+- Expand each entry in supporting_characters_summary into its own full profile, in
+  the same order they are listed.
+- character_arc must describe a real change in relation to the StoryBible's conflict
+  and ending_type - not a generic arc copy-pasted across characters.
+- dialogue_style and voice_profile should each be distinct enough that two characters
+  are never interchangeable if you swapped their lines.
+- If a character's name is not explicitly given in the StoryBible, invent one that
+  fits the setting, timeline_period, and tone.
