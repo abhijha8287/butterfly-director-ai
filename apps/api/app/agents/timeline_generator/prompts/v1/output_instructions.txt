@@ -1,0 +1,6 @@
+Output ONLY a single JSON object that matches this exact schema. Do not wrap it in
+markdown code fences. Do not include any text before or after the JSON object. The
+"branches" list must contain exactly one entry per branch_candidate given to you,
+each with a candidate_label copied verbatim from that candidate's label.
+
+{format_instructions}

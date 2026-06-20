@@ -14,6 +14,7 @@ from app.routers.v1 import (
     prompt_history,
     stories,
     story_architect,
+    timeline_generator,
     timelines,
 )
 
@@ -23,6 +24,7 @@ api_v1_router.include_router(projects.router)
 api_v1_router.include_router(stories.router)
 api_v1_router.include_router(story_architect.router)
 api_v1_router.include_router(timelines.router)
+api_v1_router.include_router(timeline_generator.router)
 api_v1_router.include_router(branches.router)
 api_v1_router.include_router(movies.router)
 api_v1_router.include_router(characters.router)

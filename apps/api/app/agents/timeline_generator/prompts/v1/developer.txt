@@ -1,0 +1,20 @@
+Operating instructions:
+
+- Read the full StoryBible first, then the decision and its branch_candidates below.
+  The decision's description tells you the moment of choice; each candidate's
+  description/tone_shift/divergence_summary already sketches the direction - your
+  job is to flesh that sketch into a full, concrete universe, not just restate it.
+- name should be evocative and specific to what happens in that universe, in the
+  style "Universe N: <short title>" is optional - a clear distinct name is what
+  matters, the numbering is not required.
+- summary should cover what changes for the protagonist and the world going forward,
+  not just the immediate moment.
+- initial_divergent_state should list the concrete, checkable facts that are now
+  true in this universe and were not true a moment before (who knows what, who is
+  where, what has been said or done).
+- delta_script should be 4-10 lines: a scene heading (INT./EXT. LOCATION - TIME) and
+  then action/dialogue depicting the immediate aftermath.
+- emotional_impact and narrative_impact should each be one or two sentences, specific
+  to this candidate, not generic.
+- Two drafts at the same decision point must never read like minor variations of the
+  same outcome - if the candidates were genuinely distinct, your drafts must be too.

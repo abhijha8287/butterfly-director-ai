@@ -2,6 +2,7 @@ from app.agents.base.agent_result import AgentRunResult
 from app.agents.character_architect.schema import CharacterProfile, CharacterRoster, VoiceProfile
 from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
 from app.agents.story_architect.schema import StoryBible
+from app.agents.timeline_generator.schema import BranchDraft, TimelineGenerationResult
 
 VALID_STORY_BIBLE_KWARGS: dict[str, object] = {
     "title": "T",
@@ -151,6 +152,54 @@ def make_decision_agent_run_result(**overrides: object) -> AgentRunResult[Decisi
         "attempts": 1,
         "prompt_tokens": 50,
         "completion_tokens": 60,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_BRANCH_DRAFT_KWARGS: dict[str, object] = {
+    "candidate_label": "Shout",
+    "name": "Universe: Rescue",
+    "summary": "She shouts and is rescued.",
+    "initial_divergent_state": "Help has been alerted.",
+    "delta_script": "INT. ALLEY - NIGHT\nShe screams. Footsteps approach.",
+    "affected_characters": ["Hero"],
+    "affected_locations": ["Alley"],
+    "emotional_impact": "Relief.",
+    "ending_divergence": "A hopeful ending becomes likely.",
+    "narrative_impact": "Introduces a rescuer subplot.",
+}
+
+
+def make_branch_draft(**overrides: object) -> BranchDraft:
+    kwargs = dict(VALID_BRANCH_DRAFT_KWARGS)
+    kwargs.update(overrides)
+    return BranchDraft(**kwargs)
+
+
+def make_timeline_generation_result(**overrides: object) -> TimelineGenerationResult:
+    branches = overrides.pop("branches", None)
+    if branches is None:
+        branches = [
+            make_branch_draft(candidate_label="Shout"),
+            make_branch_draft(
+                candidate_label="Stay silent",
+                name="Universe: Isolation",
+                summary="She stays silent and is left alone.",
+            ),
+        ]
+    return TimelineGenerationResult(branches=branches, **overrides)
+
+
+def make_timeline_agent_run_result(**overrides: object) -> AgentRunResult[TimelineGenerationResult]:
+    defaults: dict[str, object] = {
+        "output": make_timeline_generation_result(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 1011,
+        "attempts": 1,
+        "prompt_tokens": 70,
+        "completion_tokens": 80,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)

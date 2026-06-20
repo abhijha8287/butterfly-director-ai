@@ -13,8 +13,8 @@ the same reference pattern established by the **Story Architect Agent** (the fir
 shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` for the
 approved design decisions.
 
-> Status: Story Architect, Character Architect, and Decision Detector Agents are
-> complete and live-verified. Remaining agents (Timeline Generator, Character Memory,
+> Status: Story Architect, Character Architect, Decision Detector, and Timeline
+> Generator Agents are complete and live-verified. Remaining agents (Character Memory,
 > Storyboard, Prompt Director, Video, Voice, Music, Editor) are built incrementally,
 > one at a time, on top of this foundation.
 
@@ -100,6 +100,42 @@ the standalone demo, which chains Story Architect -> Decision Detector end to en
 ```bash
 docker compose exec api python -m app.demo.decision_detector
 ```
+
+### Try the Timeline Generator Agent
+
+Unlike the other three, this one needs a `project_id` too (timelines are modeled as
+the root container of a *project's* branch graph) and a `decision_id` from the
+Decision Detector step above:
+
+```bash
+curl -X POST http://localhost:8000/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{"title": "My Project", "premise": "..."}'
+# -> {"id": "<project_id>", ...}
+
+curl -X POST http://localhost:8000/v1/timelines/generate-branches \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "<project_id>", "story_id": "<story_id>", "decision_id": "<decision_id from /v1/decision/generate above>"}'
+```
+
+This expands every `branch_candidate` on that decision into a concrete `Branch` row -
+name, summary, a short script excerpt of the immediate aftermath, and the specific
+fields (`affected_characters`, `affected_locations`, `emotional_impact`,
+`ending_divergence`, `narrative_impact`) that the pre-existing Butterfly Score engine
+(`app/services/timeline_scoring_service.py`, built before this agent) reads to compute
+each branch's `butterfly_score`/`probability`/`confidence_score` - so scores stop being
+structural-baseline-only the moment this agent runs. A `Timeline` and its root
+`Branch` are created automatically on first use for a given (`project_id`, `story_id`)
+pair. Or run the standalone demo, which runs the full pipeline built so far end to end
+(it creates its own demo Project, so no setup is needed):
+
+```bash
+docker compose exec api python -m app.demo.timeline_generator
+```
+
+The branches this creates are ordinary `Branch` rows - inspect them with the
+already-existing `GET /v1/branches?timeline_id=` or `GET /v1/timelines/{id}/tree`
+endpoints, no new read endpoints were needed.
 
 ### Stopping / resetting
 
@@ -204,6 +240,12 @@ app/
 │                                  follow the same shape but persist N rows (one roster /
 │                                  one decision list) per agent run - decision_detector_service.py
 │                                  correctly persists zero rows when the agent finds no forks.
+│                                  timeline_generator_service.py is the first to persist through
+│                                  pre-existing, already-tested business logic (branch_service.py's
+│                                  create(), which already handles depth, the sibling cap, and
+│                                  butterfly-score recompute) rather than writing rows directly -
+│                                  it also lazily get-or-creates the Timeline + root Branch for a
+│                                  (project_id, story_id) pair on first use.
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -259,13 +301,34 @@ app/
 │       │                            not in ascending beat_index order) is a warning only.
 │       └── prompts/v1/               system.txt, developer.txt (interpolates the configured
 │                                    min/max into the prompt), output_instructions.txt
+│   └── timeline_generator/         Fourth agent — expands one detected decision into
+│       │                            concrete universes
+│       ├── agent.py                 TimelineGeneratorAgent: identical shape to the other
+│       │                            three agents (ChatOpenAI + PydanticOutputParser +
+│       │                            self-driven repair loop)
+│       ├── schema.py                TimelineGeneratorRequest (StoryBible + one DecisionPoint
+│       │                            in) + BranchDraft (name, summary,
+│       │                            initial_divergent_state, delta_script, plus the five
+│       │                            scoring fields below) + TimelineGenerationResult
+│       ├── validators.py            Hard check: exactly one BranchDraft per
+│       │                            branch_candidate, matched by candidate_label - this
+│       │                            mapping is load-bearing for persistence, so a mismatch
+│       │                            retries the agent rather than warning. Thin
+│       │                            affected_characters / blank ending_divergence warn only.
+│       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
 │                                   character_architect -> decision_detector -> END. Each
 │                                   downstream node reads the story node's StoryBible
-│                                   directly out of graph state. Future agents (Timeline
-│                                   Generator, ...) extend this same graph.
+│                                   directly out of graph state. Timeline Generator is
+│                                   deliberately NOT in this graph - it persists to a real
+│                                   Project/Timeline/Branch graph (DB side effects requiring
+│                                   a project_id), which doesn't fit this graph's
+│                                   pure-in-memory-agent-chaining design; it's invoked via
+│                                   its own service instead. Future LLM-only agents extend
+│                                   this graph; DB-writing agents follow timeline_generator's
+│                                   service-only pattern.
 │
 ├── integrations/
 │   ├── qwen_client.py               Low-level DashScope/Qwen HTTP client
@@ -297,9 +360,14 @@ app/
     ├── character_architect.py       python -m app.demo.character_architect — chains
     │                                Story Architect into Character Architect against
     │                                the live API and pretty-prints the resulting roster
-    └── decision_detector.py         python -m app.demo.decision_detector — chains
-                                     Story Architect into Decision Detector against
-                                     the live API and pretty-prints the resulting forks
+    ├── decision_detector.py         python -m app.demo.decision_detector — chains
+    │                                Story Architect into Decision Detector against
+    │                                the live API and pretty-prints the resulting forks
+    └── timeline_generator.py        python -m app.demo.timeline_generator — runs the
+                                     full pipeline built so far (Story -> Decision ->
+                                     Timeline) against a real DB session (creates its
+                                     own demo Project), prints the created branches
+                                     with their computed butterfly scores
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -318,14 +386,18 @@ tests/
 │                                      event loop created it; pytest-asyncio gives each
 │                                      test its own loop)
 ├── factories.py                    Shared fake StoryBible/CharacterRoster/DecisionList/
-│                                    AgentRunResult builders, reused across agents/services/
-│                                    routers/graph tests
+│                                    TimelineGenerationResult/AgentRunResult builders, reused
+│                                    across agents/services/routers/graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
 ├── graphs/                          LangGraph node wiring test (story_architect ->
-│                                    character_architect -> decision_detector, all 3 mocked)
-├── services/                        Service-layer tests against a real transactional DB
+│                                    character_architect -> decision_detector, all 3 mocked;
+│                                    timeline_generator is intentionally not part of this graph)
+├── services/                        Service-layer tests against a real transactional DB.
+│                                    test_timeline_generator_service.py also exercises the
+│                                    pre-existing branch_service.py/timeline_scoring_service.py
+│                                    it persists through (sibling cap, score recompute, depth)
 └── routers/                         Full HTTP lifecycle tests (generate -> get -> list
                                      -> delete -> 404) via the ASGI test client
 ```
@@ -335,7 +407,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -366,9 +438,10 @@ All routes are mounted under `/v1`.
 | GET | `/v1/decision/{id}` | Fetch one detected decision point by id |
 | GET | `/v1/decision?story_id=` | Cursor-paginated list of detected decision points, optionally filtered by story |
 | DELETE | `/v1/decision/{id}` | Soft-delete a detected decision point |
-| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) |
+| POST | `/v1/timelines/generate-branches` | Run the Timeline Generator Agent on a `decision_id`; persists and returns one `Branch` per `branch_candidate`, with scores computed |
+| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created, no new read endpoints needed |
 
-### Example: generate a story, then its cast, then its forks
+### Example: generate a story, then its cast, its forks, and its branches
 
 ```bash
 curl -X POST http://localhost:8000/v1/story/generate \
@@ -384,7 +457,17 @@ curl -X POST http://localhost:8000/v1/character/generate \
 curl -X POST http://localhost:8000/v1/decision/generate \
   -H "Content-Type: application/json" \
   -d '{"story_id": "<story_id>"}'
-# -> {"story_id": "<story_id>", "decisions": [{"beat_index": 0, "branch_candidates": [...]}], ...}
+# -> {"story_id": "<story_id>", "decisions": [{"id": "<decision_id>", "beat_index": 0, "branch_candidates": [...]}], ...}
+
+curl -X POST http://localhost:8000/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{"title": "...", "premise": "..."}'
+# -> {"id": "<project_id>", ...}
+
+curl -X POST http://localhost:8000/v1/timelines/generate-branches \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "<project_id>", "story_id": "<story_id>", "decision_id": "<decision_id>"}'
+# -> {"timeline_id": "<timeline_id>", "branches": [{"butterfly_score": 65, ...}, ...], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -393,9 +476,13 @@ Character generate returns a `CharacterGenerateResponse`: one full `CharacterPro
 per cast member (role, physical/voice descriptors, backstory, arc, relationships, ...).
 Decision generate returns a `DecisionGenerateResponse`: zero or more `DecisionPointRead`
 entries (each with 2-4 `branch_candidates`, every candidate carrying a `label`,
-`description`, `tone_shift`, and `divergence_summary`). All three share the same
-generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`, token
-counts).
+`description`, `tone_shift`, and `divergence_summary`). Timeline generate-branches
+returns a `TimelineGenerateBranchesResponse`: the resolved `timeline_id` plus one
+`BranchRead` per candidate - the existing `BranchRead` shape already has
+`butterfly_score`/`probability`/`confidence_score`/`stability_explanation`, now
+populated with real values instead of structural-baseline ones. All four share the
+same generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`,
+token counts).
 
 ---
 
@@ -420,9 +507,9 @@ See `.env.example` for the full, documented list. The essentials:
 
 ## Known limitations
 
-- Only the **Story Architect**, **Character Architect**, and **Decision Detector**
-  Agents are implemented end-to-end so far. Downstream agents (Timeline Generator,
-  Character Memory, Storyboard, Prompt Director, Video, Voice, Music, Editor) are
+- Only the **Story Architect**, **Character Architect**, **Decision Detector**, and
+  **Timeline Generator** Agents are implemented end-to-end so far. Downstream agents
+  (Character Memory, Storyboard, Prompt Director, Video, Voice, Music, Editor) are
   designed in `ARCHITECTURE.md` but not yet built — they're added one at a time, each
   following the Story Architect's reference pattern in `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
@@ -445,11 +532,23 @@ See `.env.example` for the full, documented list. The essentials:
   single LLM round-trip; there's no per-character regeneration endpoint yet (e.g. to fix
   just one character without regenerating the rest). The same is true of
   `DecisionDetectorAgent` and the whole decision list.
-- `DecisionDetectorAgent` only detects forks - it does not create `branches` rows. Per
-  `ARCHITECTURE.md`'s pipeline, that's the Timeline Generator agent's job (not yet
-  built), which will take a `DecisionPoint` + a chosen `branch_candidate` and turn it
-  into a concrete branch. A `DecisionList` with zero decisions is a valid, expected
-  result for a linear story and is never treated as an error.
+- `DecisionDetectorAgent` only detects forks - it does not create `branches` rows.
+  `TimelineGeneratorAgent` does that, by expanding ALL of a decision's
+  `branch_candidates` into concrete `Branch` rows in one call. A `DecisionList` with
+  zero decisions is a valid, expected result for a linear story and is never treated
+  as an error.
+- `TimelineGeneratorAgent` requires an explicit `project_id`, unlike the other three
+  agents which can run fully standalone against just a `story_id`. This is a real
+  schema constraint, not an oversight: `Timeline.project_id` is `NOT NULL` by design
+  (`ARCHITECTURE.md` models a timeline as "the root container of a *project's* branch
+  graph"), and that constraint was deliberately left alone rather than weakened to
+  match the other agents' standalone-friendly pattern.
+- Per `ARCHITECTURE.md`'s "fan-out per decision" framing, a full pipeline run would call
+  Timeline Generator once per detected decision automatically. This build calls it
+  once per `decision_id` you explicitly pass in - there's no orchestration yet that
+  loops over every decision in a `DecisionList` and fans out automatically, and no
+  handling yet for the "zero decisions -> single-branch linear timeline" finalization
+  case beyond the root branch that's lazily created on first use.
 - The Celery `worker` binds to every queue in a single process for this build
   (per the approved design doc); splitting into dedicated per-queue worker pools is a
   `docker-compose.yml` change, not a code change.
