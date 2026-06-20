@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     provider_poll_interval_seconds: float = Field(default=15.0)
     provider_poll_timeout_seconds: float = Field(default=600.0)
 
+    # Decision Detector: bounds fan-out cost by capping how many branch
+    # candidates a single decision point may produce. Enforced as a semantic
+    # (config-driven) check in app/agents/decision_detector/validators.py,
+    # not a hardcoded Pydantic Field constraint, since it's meant to be tuned
+    # per deployment without a code change.
+    decision_branch_candidates_min: int = Field(default=2)
+    decision_branch_candidates_max: int = Field(default=4)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors_origins(cls, value: object) -> object:

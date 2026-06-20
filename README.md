@@ -13,9 +13,10 @@ the same reference pattern established by the **Story Architect Agent** (the fir
 shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` for the
 approved design decisions.
 
-> Status: Story Architect and Character Architect Agents are complete and live-verified.
-> Remaining agents (Timeline/Butterfly, Storyboard, Video, Voice, Music, Editing) are
-> built incrementally, one at a time, on top of this foundation.
+> Status: Story Architect, Character Architect, and Decision Detector Agents are
+> complete and live-verified. Remaining agents (Timeline Generator, Character Memory,
+> Storyboard, Prompt Director, Video, Voice, Music, Editor) are built incrementally,
+> one at a time, on top of this foundation.
 
 ---
 
@@ -78,6 +79,26 @@ run the standalone demo, which chains Story Architect -> Character Architect end
 
 ```bash
 docker compose exec api python -m app.demo.character_architect
+```
+
+### Try the Decision Detector Agent
+
+Feed the same story id in to find its branch points:
+
+```bash
+curl -X POST http://localhost:8000/v1/decision/generate \
+  -H "Content-Type: application/json" \
+  -d '{"story_id": "<id from /v1/story/generate above>"}'
+```
+
+This fetches the persisted `StoryBible`, runs the Decision Detector Agent against the
+live DashScope `qwen-plus` model, and persists one `DecisionPoint` row per genuine fork
+it finds (each with 2-4 mutually exclusive `branch_candidates`). An empty result is
+valid and expected for a linear story - it means there's nothing to branch on. Or run
+the standalone demo, which chains Story Architect -> Decision Detector end to end:
+
+```bash
+docker compose exec api python -m app.demo.decision_detector
 ```
 
 ### Stopping / resetting
@@ -158,15 +179,17 @@ app/
 ├── db/
 │   ├── base.py                    Async SQLAlchemy engine/session factory
 │   ├── models/                    SQLAlchemy ORM models: project, story, character,
-│   │                              timeline, branch, movie, asset, job, agent_log,
-│   │                              prompt_history, enums, mixins (timestamps/soft-delete).
-│   │                              story.project_id and character.project_id are both
-│   │                              nullable (agents generate them standalone, before any
-│   │                              Project exists); character.story_id links a generated
-│   │                              cast back to the Story it was built from.
+│   │                              decision_point, timeline, branch, movie, asset, job,
+│   │                              agent_log, prompt_history, enums, mixins (timestamps/
+│   │                              soft-delete). story.project_id and character.project_id
+│   │                              are both nullable (agents generate them standalone,
+│   │                              before any Project exists); character.story_id and
+│   │                              decision_point.story_id link generated rows back to
+│   │                              the Story they were built from.
 │   └── migrations/                Alembic migrations (initial schema, butterfly-score
 │                                   fields, nullable story.project_id + generation_metadata,
-│                                   nullable character.project_id + story_id + generation_metadata)
+│                                   nullable character.project_id + story_id + generation_metadata,
+│                                   new decision_points table)
 │
 ├── repositories/                  One repository per model — thin async CRUD wrappers
 │                                  over SQLAlchemy (BaseRepository[Model] generic base)
@@ -177,8 +200,10 @@ app/
 ├── services/                      Business logic layer — one per resource, called by routers.
 │                                  story_architect_service.py is the reference implementation:
 │                                  runs the agent, persists the result + AgentLog audit trail.
-│                                  character_architect_service.py follows the same shape but
-│                                  persists N Character rows (one roster) per agent run.
+│                                  character_architect_service.py and decision_detector_service.py
+│                                  follow the same shape but persist N rows (one roster /
+│                                  one decision list) per agent run - decision_detector_service.py
+│                                  correctly persists zero rows when the agent finds no forks.
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -200,28 +225,47 @@ app/
 │   │   │                            tolerance is a hard fail; genre/hooks mismatches warn)
 │   │   └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │   │                                (versioned — future prompt changes ship as v2/, v3/...)
-│   └── character_architect/        Second agent — consumes a StoryBible, never raw text
-│       ├── agent.py                 CharacterArchitectAgent: identical shape to
-│       │                            StoryArchitectAgent (ChatOpenAI + PydanticOutputParser
-│       │                            + self-driven repair loop)
-│       ├── schema.py                CharacterRequest (StoryBible in) + CharacterProfile
-│       │                            (deep per-character contract: physical_description and
-│       │                            voice_profile are written to be used directly as video/
-│       │                            voice generation prompt fragments) + CharacterRoster
-│       │                            (exactly one protagonist enforced; duplicate names
-│       │                            rejected)
-│       ├── validators.py            Semantic checks vs the source StoryBible (antagonist
-│       │                            expected-but-missing, supporting-character count
-│       │                            mismatch, characters with no relationships — all warn,
-│       │                            never hard-fail; the protagonist/duplicate-name rules
-│       │                            are hard-enforced in schema.py instead)
-│       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│   ├── character_architect/        Second agent — consumes a StoryBible, never raw text
+│   │   ├── agent.py                 CharacterArchitectAgent: identical shape to
+│   │   │                            StoryArchitectAgent (ChatOpenAI + PydanticOutputParser
+│   │   │                            + self-driven repair loop)
+│   │   ├── schema.py                CharacterRequest (StoryBible in) + CharacterProfile
+│   │   │                            (deep per-character contract: physical_description and
+│   │   │                            voice_profile are written to be used directly as video/
+│   │   │                            voice generation prompt fragments) + CharacterRoster
+│   │   │                            (exactly one protagonist enforced; duplicate names
+│   │   │                            rejected)
+│   │   ├── validators.py            Semantic checks vs the source StoryBible (antagonist
+│   │   │                            expected-but-missing, supporting-character count
+│   │   │                            mismatch, characters with no relationships — all warn,
+│   │   │                            never hard-fail; the protagonist/duplicate-name rules
+│   │   │                            are hard-enforced in schema.py instead)
+│   │   └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│   └── decision_detector/          Third agent — finds the story's genuine fork points
+│       ├── agent.py                 DecisionDetectorAgent: identical shape to the other
+│       │                            two agents (ChatOpenAI + PydanticOutputParser +
+│       │                            self-driven repair loop)
+│       ├── schema.py                DecisionDetectorRequest (StoryBible in) + BranchCandidate
+│       │                            (label/description/tone_shift/divergence_summary) +
+│       │                            DecisionPoint (beat_index, description, source_hook,
+│       │                            branch_candidates[]) + DecisionList (unique beat_index
+│       │                            enforced; an EMPTY list is valid - a linear story with
+│       │                            no forks is a legitimate, common output, not an error)
+│       ├── validators.py            Settings-driven hard check: each decision's candidate
+│       │                            count must fall within
+│       │                            [decision_branch_candidates_min, _max] (default 2-4,
+│       │                            bounds fan-out cost) - violating this retries the agent.
+│       │                            Everything else (story_hooks left unmapped, decisions
+│       │                            not in ascending beat_index order) is a warning only.
+│       └── prompts/v1/               system.txt, developer.txt (interpolates the configured
+│                                    min/max into the prompt), output_instructions.txt
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
-│                                   character_architect -> END. The character node reads
-│                                   the story node's StoryBible output directly out of
-│                                   graph state. Future agents extend this same graph.
+│                                   character_architect -> decision_detector -> END. Each
+│                                   downstream node reads the story node's StoryBible
+│                                   directly out of graph state. Future agents (Timeline
+│                                   Generator, ...) extend this same graph.
 │
 ├── integrations/
 │   ├── qwen_client.py               Low-level DashScope/Qwen HTTP client
@@ -250,9 +294,12 @@ app/
     ├── story_architect.py           python -m app.demo.story_architect — standalone
     │                                script that calls the live agent and pretty-prints
     │                                the resulting StoryBible + generation metadata
-    └── character_architect.py       python -m app.demo.character_architect — chains
-                                     Story Architect into Character Architect against
-                                     the live API and pretty-prints the resulting roster
+    ├── character_architect.py       python -m app.demo.character_architect — chains
+    │                                Story Architect into Character Architect against
+    │                                the live API and pretty-prints the resulting roster
+    └── decision_detector.py         python -m app.demo.decision_detector — chains
+                                     Story Architect into Decision Detector against
+                                     the live API and pretty-prints the resulting forks
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -270,13 +317,14 @@ tests/
 │                                      pool between tests (pool is bound to whichever
 │                                      event loop created it; pytest-asyncio gives each
 │                                      test its own loop)
-├── factories.py                    Shared fake StoryBible/CharacterRoster/AgentRunResult
-│                                    builders, reused across agents/services/routers/graph tests
+├── factories.py                    Shared fake StoryBible/CharacterRoster/DecisionList/
+│                                    AgentRunResult builders, reused across agents/services/
+│                                    routers/graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
 ├── graphs/                          LangGraph node wiring test (story_architect ->
-│                                    character_architect, both agents mocked)
+│                                    character_architect -> decision_detector, all 3 mocked)
 ├── services/                        Service-layer tests against a real transactional DB
 └── routers/                         Full HTTP lifecycle tests (generate -> get -> list
                                      -> delete -> 404) via the ASGI test client
@@ -287,7 +335,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -314,9 +362,13 @@ All routes are mounted under `/v1`.
 | GET | `/v1/character/{id}` | Fetch one generated character profile by id |
 | GET | `/v1/character?story_id=` | Cursor-paginated list of generated characters, optionally filtered by story |
 | DELETE | `/v1/character/{id}` | Soft-delete a generated character |
+| POST | `/v1/decision/generate` | Run the Decision Detector Agent on a `story_id`; persists and returns the detected forks (possibly empty) |
+| GET | `/v1/decision/{id}` | Fetch one detected decision point by id |
+| GET | `/v1/decision?story_id=` | Cursor-paginated list of detected decision points, optionally filtered by story |
+| DELETE | `/v1/decision/{id}` | Soft-delete a detected decision point |
 | `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) |
 
-### Example: generate a story, then its cast
+### Example: generate a story, then its cast, then its forks
 
 ```bash
 curl -X POST http://localhost:8000/v1/story/generate \
@@ -328,13 +380,22 @@ curl -X POST http://localhost:8000/v1/character/generate \
   -H "Content-Type: application/json" \
   -d '{"story_id": "<story_id>"}'
 # -> {"story_id": "<story_id>", "characters": [{...protagonist...}, {...}], ...}
+
+curl -X POST http://localhost:8000/v1/decision/generate \
+  -H "Content-Type: application/json" \
+  -d '{"story_id": "<story_id>"}'
+# -> {"story_id": "<story_id>", "decisions": [{"beat_index": 0, "branch_candidates": [...]}], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
 generation provenance (`model`, `prompt_version`, `latency_ms`, `attempts`, token counts).
 Character generate returns a `CharacterGenerateResponse`: one full `CharacterProfileRead`
-per cast member (role, physical/voice descriptors, backstory, arc, relationships, ...),
-plus the same generation provenance shape.
+per cast member (role, physical/voice descriptors, backstory, arc, relationships, ...).
+Decision generate returns a `DecisionGenerateResponse`: zero or more `DecisionPointRead`
+entries (each with 2-4 `branch_candidates`, every candidate carrying a `label`,
+`description`, `tone_shift`, and `divergence_summary`). All three share the same
+generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`, token
+counts).
 
 ---
 
@@ -348,6 +409,9 @@ See `.env.example` for the full, documented list. The essentials:
 - `QWEN_MODEL`, `WAN_MODEL`, `COSYVOICE_MODEL` — model selection per capability.
 - `VIDEO_PROVIDER`, `VOICE_PROVIDER`, `MUSIC_PROVIDER` — Strategy-pattern vendor
   selection (`wan`/`happyhorse`, `dashscope`/`happyhorse`, `happyhorse`/`none`).
+- `DECISION_BRANCH_CANDIDATES_MIN` / `_MAX` (default 2/4) — bounds how many branch
+  candidates the Decision Detector Agent may produce per decision point, to cap
+  multiverse fan-out cost downstream.
 - `AUTH_ENABLED` — auth middleware exists but is off by default for this build.
 - Database/Redis/Celery URLs — only matter if running the API outside docker-compose;
   compose overrides them to point at the in-network `postgres`/`redis` services.
@@ -356,19 +420,21 @@ See `.env.example` for the full, documented list. The essentials:
 
 ## Known limitations
 
-- Only the **Story Architect** and **Character Architect** Agents are implemented
-  end-to-end so far. Downstream agents (Timeline/Butterfly-Score, Storyboard, Video,
-  Voice, Music, Editing) are designed in `ARCHITECTURE.md` but not yet built — they're
-  added one at a time, each following the Story Architect's reference pattern in
-  `app/agents/`.
+- Only the **Story Architect**, **Character Architect**, and **Decision Detector**
+  Agents are implemented end-to-end so far. Downstream agents (Timeline Generator,
+  Character Memory, Storyboard, Prompt Director, Video, Voice, Music, Editor) are
+  designed in `ARCHITECTURE.md` but not yet built — they're added one at a time, each
+  following the Story Architect's reference pattern in `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
   or character created via the older generic `/v1/stories` or `/v1/characters` endpoints
   has a different shape and isn't handled by these paths — `_to_profile_read` defends
   against missing keys with defaults, but the result would be mostly-empty fields.
+  `decision_points` has no equivalent generic CRUD endpoint, so this particular gap
+  doesn't apply to it.
 - `langchain.output_parsers.OutputFixingParser` does not exist in the pinned
-  langchain 1.x line — both agents' repair/retry loop is hand-rolled in `agent.py`
+  langchain 1.x line — all three agents' repair/retry loop is hand-rolled in `agent.py`
   instead, and is the pattern future agents should follow.
 - `CharacterArchitectAgent` enforces exactly one protagonist and rejects duplicate names
   as hard schema-level failures (triggers the retry loop); a missing antagonist (when the
@@ -377,7 +443,13 @@ See `.env.example` for the full, documented list. The essentials:
   reasonably merge or split characters the summary didn't fully anticipate.
 - One `CharacterArchitectAgent.run()` call produces and persists the whole cast in a
   single LLM round-trip; there's no per-character regeneration endpoint yet (e.g. to fix
-  just one character without regenerating the rest).
+  just one character without regenerating the rest). The same is true of
+  `DecisionDetectorAgent` and the whole decision list.
+- `DecisionDetectorAgent` only detects forks - it does not create `branches` rows. Per
+  `ARCHITECTURE.md`'s pipeline, that's the Timeline Generator agent's job (not yet
+  built), which will take a `DecisionPoint` + a chosen `branch_candidate` and turn it
+  into a concrete branch. A `DecisionList` with zero decisions is a valid, expected
+  result for a linear story and is never treated as an error.
 - The Celery `worker` binds to every queue in a single process for this build
   (per the approved design doc); splitting into dedicated per-queue worker pools is a
   `docker-compose.yml` change, not a code change.

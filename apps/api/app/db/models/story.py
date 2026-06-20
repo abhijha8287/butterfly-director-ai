@@ -12,6 +12,7 @@ from app.db.models.mixins import SoftDeleteMixin, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
     from app.db.models.character import Character
+    from app.db.models.decision_point import DecisionPoint
     from app.db.models.project import Project
     from app.db.models.timeline import Timeline
 
@@ -43,3 +44,4 @@ class Story(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
     project: Mapped["Project | None"] = relationship(back_populates="stories")
     timelines: Mapped[list["Timeline"]] = relationship(back_populates="story")
     characters: Mapped[list["Character"]] = relationship(back_populates="story")
+    decision_points: Mapped[list["DecisionPoint"]] = relationship(back_populates="story")

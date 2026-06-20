@@ -1,5 +1,6 @@
 from app.agents.base.agent_result import AgentRunResult
 from app.agents.character_architect.schema import CharacterProfile, CharacterRoster, VoiceProfile
+from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
 from app.agents.story_architect.schema import StoryBible
 
 VALID_STORY_BIBLE_KWARGS: dict[str, object] = {
@@ -99,6 +100,57 @@ def make_character_agent_run_result(**overrides: object) -> AgentRunResult[Chara
         "attempts": 1,
         "prompt_tokens": 30,
         "completion_tokens": 40,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_BRANCH_CANDIDATE_KWARGS: dict[str, object] = {
+    "label": "Shout",
+    "description": "She shouts for help.",
+    "tone_shift": "Tension spikes.",
+    "divergence_summary": "This universe ends with rescue.",
+}
+
+
+def make_branch_candidate(**overrides: object) -> BranchCandidate:
+    kwargs = dict(VALID_BRANCH_CANDIDATE_KWARGS)
+    kwargs.update(overrides)
+    return BranchCandidate(**kwargs)
+
+
+VALID_DECISION_POINT_KWARGS: dict[str, object] = {
+    "beat_index": 0,
+    "description": "She must decide whether to shout or stay silent.",
+    "source_hook": "hook",
+}
+
+
+def make_decision_point(**overrides: object) -> DecisionPoint:
+    kwargs = dict(VALID_DECISION_POINT_KWARGS)
+    branch_candidates = overrides.pop(
+        "branch_candidates", [make_branch_candidate(), make_branch_candidate(label="Stay silent")]
+    )
+    kwargs.update(overrides)
+    return DecisionPoint(branch_candidates=branch_candidates, **kwargs)
+
+
+def make_decision_list(**overrides: object) -> DecisionList:
+    decisions = overrides.pop("decisions", None)
+    if decisions is None:
+        decisions = [make_decision_point()]
+    return DecisionList(decisions=decisions, **overrides)
+
+
+def make_decision_agent_run_result(**overrides: object) -> AgentRunResult[DecisionList]:
+    defaults: dict[str, object] = {
+        "output": make_decision_list(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 789,
+        "attempts": 1,
+        "prompt_tokens": 50,
+        "completion_tokens": 60,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)

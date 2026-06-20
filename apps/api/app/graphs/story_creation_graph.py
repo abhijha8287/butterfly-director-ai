@@ -7,17 +7,19 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.agents.character_architect.agent import CharacterArchitectAgent
 from app.agents.character_architect.schema import CharacterRequest, CharacterRoster
+from app.agents.decision_detector.agent import DecisionDetectorAgent
+from app.agents.decision_detector.schema import DecisionDetectorRequest, DecisionList
 from app.agents.story_architect.agent import StoryArchitectAgent
 from app.agents.story_architect.schema import StoryBible, StoryRequest
 
 
 class StoryCreationState(TypedDict, total=False):
     """Graph state covering the narrative-foundation stage: Story Architect ->
-    Character Architect. Each node's generation metadata is kept under its own
-    key (story_* / character_*) since the two agents run separately and report
-    separate latency/token/attempt counts. Future agents (Decision Detector,
-    Storyboard, ...) extend this same state and add edges after
-    "character_architect" rather than replacing this graph.
+    Character Architect -> Decision Detector. Each node's generation metadata
+    is kept under its own key (story_* / character_* / decision_*) since each
+    agent runs separately and reports separate latency/token/attempt counts.
+    Future agents (Timeline Generator, Storyboard, ...) extend this same state
+    and add edges after "decision_detector" rather than replacing this graph.
     """
 
     request: StoryRequest
@@ -36,6 +38,14 @@ class StoryCreationState(TypedDict, total=False):
     character_attempts: int
     character_prompt_tokens: int | None
     character_completion_tokens: int | None
+
+    decision_list: DecisionList
+    decision_model: str
+    decision_prompt_version: str
+    decision_latency_ms: int
+    decision_attempts: int
+    decision_prompt_tokens: int | None
+    decision_completion_tokens: int | None
 
 
 async def story_architect_node(state: StoryCreationState) -> dict:
@@ -66,11 +76,27 @@ async def character_architect_node(state: StoryCreationState) -> dict:
     }
 
 
+async def decision_detector_node(state: StoryCreationState) -> dict:
+    agent = DecisionDetectorAgent()
+    result = await agent.run(DecisionDetectorRequest(story_bible=state["story_bible"]))
+    return {
+        "decision_list": result.output,
+        "decision_model": result.model,
+        "decision_prompt_version": result.prompt_version,
+        "decision_latency_ms": result.latency_ms,
+        "decision_attempts": result.attempts,
+        "decision_prompt_tokens": result.prompt_tokens,
+        "decision_completion_tokens": result.completion_tokens,
+    }
+
+
 def build_story_creation_graph() -> CompiledStateGraph:
     graph = StateGraph(StoryCreationState)
     graph.add_node("story_architect", story_architect_node)
     graph.add_node("character_architect", character_architect_node)
+    graph.add_node("decision_detector", decision_detector_node)
     graph.add_edge(START, "story_architect")
     graph.add_edge("story_architect", "character_architect")
-    graph.add_edge("character_architect", END)
+    graph.add_edge("character_architect", "decision_detector")
+    graph.add_edge("decision_detector", END)
     return graph.compile()

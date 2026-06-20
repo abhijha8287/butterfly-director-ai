@@ -1,0 +1,15 @@
+Operating instructions:
+
+- Read the full StoryBible below before identifying any decision. conflict and themes
+  tell you what's actually at stake; tone and ending_type tell you how far branches are
+  allowed to diverge before they stop being recognizably "this story."
+- Work through story_hooks first: for each one, decide whether it describes a real
+  fork. If it does, set source_hook to that hook's exact text and build the decision
+  around it. If a hook is too vague to fork concretely, you may still use it as
+  inspiration without setting source_hook, or omit it.
+- You may also detect a genuine decision point that none of the story_hooks mention,
+  if the synopsis or conflict clearly implies one.
+- Produce between {min_candidates} and {max_candidates} branch_candidates per decision.
+- Order decisions by where they occur in the story (beat_index ascending, starting at 0).
+- divergence_summary for each candidate should describe the universe that results, not
+  just restate the candidate's description.
