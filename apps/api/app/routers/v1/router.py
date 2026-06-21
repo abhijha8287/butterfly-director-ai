@@ -12,6 +12,7 @@ from app.routers.v1 import (
     jobs,
     movies,
     projects,
+    prompt_director,
     prompt_history,
     stories,
     story_architect,
@@ -38,3 +39,4 @@ api_v1_router.include_router(assets.router)
 api_v1_router.include_router(jobs.router)
 api_v1_router.include_router(agent_logs.router)
 api_v1_router.include_router(prompt_history.router)
+api_v1_router.include_router(prompt_director.router)

@@ -1,0 +1,16 @@
+Operating instructions:
+
+- Read the StoryBible's visual_style and cinematic_style first - every style_tokens
+  list in your output should draw from these, worded consistently across all shots.
+- For each shot, read its scene, description, camera, and the resolved visual profile
+  of every character present (physical_description, wardrobe_style, emotional_state,
+  physical_state).
+- Build positive_prompt as a single dense paragraph: characters (using their
+  physical_description/wardrobe_style plus current emotional/physical state) + action
+  (from description) + setting (scene) + camera (from camera) + lighting/style (from
+  visual_style/cinematic_style).
+- Build negative_prompt from what would break THIS shot specifically - wrong number of
+  characters, anachronistic elements, inconsistent lighting, text/watermarks, etc.
+- Reuse the exact same consistency_tokens wording for a character across every shot
+  they appear in - do not vary their physical description shot to shot.
+- Process shots in the order given and output them in that same order.

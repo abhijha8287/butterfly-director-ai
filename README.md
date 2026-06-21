@@ -14,9 +14,9 @@ shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` fo
 approved design decisions.
 
 > Status: Story Architect, Character Architect, Decision Detector, Timeline Generator,
-> Character Memory, and Storyboard Agents are complete and live-verified. Remaining
-> agents (Prompt Director, Video, Voice, Music, Editor) are built incrementally, one
-> at a time, on top of this foundation.
+> Character Memory, Storyboard, and Prompt Director Agents are complete and
+> live-verified. Remaining agents (Video, Voice, Music, Editor) are built
+> incrementally, one at a time, on top of this foundation.
 
 ---
 
@@ -200,6 +200,42 @@ docker compose exec api python -m app.demo.storyboard
 The storyboards this creates are readable via `GET /v1/storyboard?branch_id=`
 (version history, most recent first) or `GET /v1/storyboard/{version_id}`.
 
+### Try the Prompt Director Agent
+
+Takes a `storyboard_version_id` (not a `branch_id`) - a branch can have multiple
+historical storyboard versions, so the caller must say which one to direct prompts
+for:
+
+```bash
+curl -X POST http://localhost:8000/v1/prompt-history/generate \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id from /v1/storyboard/generate above>"}'
+```
+
+This resolves the storyboard `Version`'s shots, the story's `StoryBible`, and each
+shot's present characters' visual/state context (from Character Memory, if it's run
+yet), then asks the LLM for exactly one `ShotPrompt` per shot - a provider-ready
+`positive_prompt`, a concrete per-shot `negative_prompt`, `consistency_tokens` reused
+verbatim for the same character across shots, and `style_tokens` drawn from the
+StoryBible's visual style. Unlike every other agent so far, this one needed **zero**
+new database models or migrations: it persists each `ShotPrompt` as an ordinary row in
+the pre-existing, already-built-read-only `prompt_history` table (`ARCHITECTURE.md`
+§4.9's `prompts` table) - `rendered_prompt` holds the positive prompt, and
+`input_payload` (JSONB) holds the shot reference, negative prompt, and both token
+lists. This agent only adds the write path (`POST /generate`), mounted onto that
+table's existing `/prompt-history` router prefix, exactly mirroring how Timeline
+Generator mounted its `generate-branches` route onto the pre-existing `/timelines`
+prefix. Or run the standalone demo, which runs the full pipeline built so far end to
+end (it creates its own demo Project):
+
+```bash
+docker compose exec api python -m app.demo.prompt_director
+```
+
+The prompts this creates are readable via the already-existing
+`GET /v1/prompt-history?branch_id=` or `GET /v1/prompt-history/{id}` endpoints - no
+new read endpoints were needed.
+
 ### Stopping / resetting
 
 ```bash
@@ -331,6 +367,10 @@ app/
 │                                  persists through version_repository.py's generic Version table
 │                                  rather than a bespoke one, and lazily get-or-creates the branch's
 │                                  Movie row, moving it to `storyboarding` status.
+│                                  prompt_director_service.py takes a storyboard_version_id, resolves
+│                                  the StoryBible/shots/character context, and persists through the
+│                                  pre-existing prompt_history_repository.py - the first agent needing
+│                                  zero new DB models, since the prompts table predates it.
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -440,6 +480,23 @@ app/
 │       │                            or a single shot's duration_seconds being
 │       │                            unrealistically long, warn only.
 │       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│   └── prompt_director/            Seventh agent — turns one storyboard's shots into
+│       │                            provider-ready text-to-video prompts
+│       ├── agent.py                 PromptDirectorAgent: identical shape to the other
+│       │                            six agents (ChatOpenAI + PydanticOutputParser +
+│       │                            self-driven repair loop), temperature=0.5
+│       ├── schema.py                PromptDirectorRequest (StoryBible + ShotContext[]
+│       │                            in, each with resolved CharacterVisualProfile[])
+│       │                            + ShotPrompt (shot_number, positive_prompt,
+│       │                            negative_prompt, consistency_tokens, style_tokens)
+│       │                            + PromptDirectorResult
+│       ├── validators.py            Hard check: exactly one ShotPrompt per shot,
+│       │                            matched by shot_number, no duplicates - this
+│       │                            mapping is load-bearing for persistence (it maps
+│       │                            prompts back onto the raw shot dict by number).
+│       │                            A blank negative_prompt, or characters present
+│       │                            with no consistency_tokens, warn only.
+│       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
@@ -503,12 +560,20 @@ app/
     │                                real DB session (creates its own demo Project),
     │                                prints each character's resolved state_diff +
     │                                drift judgment for the first generated branch
-    └── storyboard.py                python -m app.demo.storyboard — runs the full
-                                     pipeline built so far (Story -> Character ->
+    ├── storyboard.py                python -m app.demo.storyboard — runs the full
+    │                                pipeline built so far (Story -> Character ->
+    │                                Decision -> Timeline -> Character Memory ->
+    │                                Storyboard) against a real DB session (creates its
+    │                                own demo Project), prints the ordered shot list for
+    │                                the first generated branch
+    └── prompt_director.py           python -m app.demo.prompt_director — runs the
+                                     full pipeline built so far (Story -> Character ->
                                      Decision -> Timeline -> Character Memory ->
-                                     Storyboard) against a real DB session (creates its
-                                     own demo Project), prints the ordered shot list for
-                                     the first generated branch
+                                     Storyboard -> Prompt Director) against a real DB
+                                     session (creates its own demo Project), prints the
+                                     resulting shot prompts (positive/negative prompts,
+                                     consistency/style tokens) for the first generated
+                                     branch
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -528,8 +593,9 @@ tests/
 │                                      test its own loop)
 ├── factories.py                    Shared fake StoryBible/CharacterRoster/DecisionList/
 │                                    TimelineGenerationResult/CharacterMemoryResult/
-│                                    StoryboardResult/AgentRunResult builders, reused
-│                                    across agents/services/routers/graph tests
+│                                    StoryboardResult/PromptDirectorResult/AgentRunResult
+│                                    builders, reused across agents/services/routers/graph
+│                                    tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
@@ -549,7 +615,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py tests/agents/test_prompt_director_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -589,7 +655,8 @@ All routes are mounted under `/v1`.
 | GET | `/v1/storyboard/{version_id}` | Fetch one persisted storyboard version by id |
 | GET | `/v1/storyboard?branch_id=` | Cursor-paginated version history for a branch's storyboard, most recent first |
 | DELETE | `/v1/storyboard/{version_id}` | Soft-delete a persisted storyboard version |
-| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created, no new read endpoints needed |
+| POST | `/v1/prompt-history/generate` | Run the Prompt Director Agent on a `storyboard_version_id`; persists and returns one `PromptHistoryRead` per shot |
+| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director created - no new read endpoints needed for either |
 
 ### Example: generate a story, then its cast, its forks, and its branches
 
@@ -627,7 +694,12 @@ curl -X POST http://localhost:8000/v1/character-memory/generate \
 curl -X POST http://localhost:8000/v1/storyboard/generate \
   -H "Content-Type: application/json" \
   -d '{"branch_id": "<branch_id>"}'
-# -> {"branch_id": "<branch_id>", "version_number": 1, "shots": [{"shot_number": 1, "scene": "...", ...}, ...], ...}
+# -> {"branch_id": "<branch_id>", "version_id": "<version_id>", "version_number": 1, "shots": [{"shot_number": 1, "scene": "...", ...}, ...], ...}
+
+curl -X POST http://localhost:8000/v1/prompt-history/generate \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id>"}'
+# -> {"branch_id": "<branch_id>", "storyboard_version_id": "<version_id>", "shot_prompts": [{"rendered_prompt": "...", ...}, ...], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -646,10 +718,14 @@ generate returns a `CharacterMemoryGenerateResponse`: the resolved `story_id` pl
 `drift_warning`). Storyboard generate returns a `StoryboardGenerateResponse`: the
 resolved `movie_id` and `version_id`/`version_number` plus the ordered `shots` list
 (`scene`, `shot_number`, `description`, `camera`, `duration_seconds`,
-`characters_present`). All six share the same generation-provenance shape (`model`,
-`prompt_version`, `latency_ms`, `attempts`, token counts) - Character Memory's is all
-zero/`"n/a"` in the one case where it skips the LLM call entirely (a story with no
-characters yet).
+`characters_present`). Prompt Director generate returns a
+`PromptDirectorGenerateResponse`: the resolved `branch_id` and `storyboard_version_id`
+plus one `PromptHistoryRead` per shot (sorted by shot number), each carrying the
+provider-ready `rendered_prompt` and an `input_payload` with the shot reference,
+negative prompt, and consistency/style tokens. All seven share the same
+generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`, token
+counts) - Character Memory's is all zero/`"n/a"` in the one case where it skips the LLM
+call entirely (a story with no characters yet).
 
 ---
 
@@ -675,11 +751,11 @@ See `.env.example` for the full, documented list. The essentials:
 ## Known limitations
 
 - Only the **Story Architect**, **Character Architect**, **Decision Detector**,
-  **Timeline Generator**, **Character Memory**, and **Storyboard** Agents are
-  implemented end-to-end so far. Downstream agents (Prompt Director, Video, Voice,
-  Music, Editor) are designed in `ARCHITECTURE.md` but not yet built — they're added
-  one at a time, each following the Story Architect's reference pattern in
-  `app/agents/`.
+  **Timeline Generator**, **Character Memory**, **Storyboard**, and **Prompt
+  Director** Agents are implemented end-to-end so far. Downstream agents (Video,
+  Voice, Music, Editor) are designed in `ARCHITECTURE.md` but not yet built —
+  they're added one at a time, each following the Story Architect's reference
+  pattern in `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
@@ -736,6 +812,19 @@ See `.env.example` for the full, documented list. The essentials:
   the previous one, since the `versions` table is explicitly designed for regeneration
   history; this is the one branch-scoped agent so far where reruns are additive rather
   than in-place updates.
+- `PromptDirectorAgent` is the first agent requiring **zero** new DB models or
+  migrations - it persists through the pre-existing, previously read-only
+  `prompt_history` table (`ARCHITECTURE.md` §4.9), adding only the `POST /generate`
+  write path onto its existing `/prompt-history` router prefix.
+- `PromptDirectorAgent` runs once per `storyboard_version_id` you explicitly pass in,
+  same as the other branch/version-scoped agents - no automatic orchestration yet.
+  Re-running it for the same storyboard version always inserts a fresh batch of
+  `PromptHistory` rows (there's no upsert) rather than updating or replacing the
+  previous batch.
+- `PromptDirectorAgent` silently skips any name in a shot's `characters_present` that
+  doesn't match a character in the story's roster (rather than erroring), the same
+  graceful-degradation choice `StoryboardAgent` makes for unresolved Character Memory
+  state.
 - The Celery `worker` binds to every queue in a single process for this build
   (per the approved design doc); splitting into dedicated per-queue worker pools is a
   `docker-compose.yml` change, not a code change.

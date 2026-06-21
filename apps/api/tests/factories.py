@@ -8,6 +8,13 @@ from app.agents.character_memory.schema import (
     CharacterStateDiff,
 )
 from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
+from app.agents.prompt_director.schema import (
+    CharacterVisualProfile,
+    PromptDirectorRequest,
+    PromptDirectorResult,
+    ShotContext,
+    ShotPrompt,
+)
 from app.agents.story_architect.schema import StoryBible
 from app.agents.storyboard.schema import (
     CharacterStateSummary,
@@ -366,6 +373,85 @@ def make_storyboard_agent_run_result(**overrides: object) -> AgentRunResult[Stor
         "attempts": 1,
         "prompt_tokens": 110,
         "completion_tokens": 120,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_CHARACTER_VISUAL_PROFILE_KWARGS: dict[str, object] = {
+    "name": "Hero",
+    "physical_description": "Tall, sharp-eyed.",
+    "wardrobe_style": "Worn leather jacket.",
+    "emotional_state": "Relieved but shaken.",
+    "physical_state": "Minor bruising from the struggle.",
+}
+
+
+def make_character_visual_profile(**overrides: object) -> CharacterVisualProfile:
+    kwargs = dict(VALID_CHARACTER_VISUAL_PROFILE_KWARGS)
+    kwargs.update(overrides)
+    return CharacterVisualProfile(**kwargs)
+
+
+VALID_SHOT_CONTEXT_KWARGS: dict[str, object] = {
+    "scene": "INT. ALLEY - NIGHT",
+    "shot_number": 1,
+    "description": "She screams. Footsteps approach.",
+    "camera": "low-angle tracking shot",
+    "duration_seconds": 4.5,
+}
+
+
+def make_shot_context(**overrides: object) -> ShotContext:
+    kwargs = dict(VALID_SHOT_CONTEXT_KWARGS)
+    characters = overrides.pop("characters", None)
+    if characters is None:
+        characters = [make_character_visual_profile()]
+    kwargs.update(overrides)
+    return ShotContext(characters=characters, **kwargs)
+
+
+def make_prompt_director_request(**overrides: object) -> PromptDirectorRequest:
+    story_bible = overrides.pop("story_bible", None) or make_story_bible()
+    shots = overrides.pop("shots", None)
+    if shots is None:
+        shots = [make_shot_context()]
+    return PromptDirectorRequest(story_bible=story_bible, shots=shots, **overrides)
+
+
+VALID_SHOT_PROMPT_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "positive_prompt": "Tall, sharp-eyed woman in a worn leather jacket screams in a dark alley.",
+    "negative_prompt": "extra limbs, wrong character count, text artifacts",
+    "consistency_tokens": ["tall sharp-eyed woman", "worn leather jacket"],
+    "style_tokens": ["high-contrast neon noir"],
+}
+
+
+def make_shot_prompt(**overrides: object) -> ShotPrompt:
+    kwargs = dict(VALID_SHOT_PROMPT_KWARGS)
+    kwargs.update(overrides)
+    return ShotPrompt(**kwargs)
+
+
+def make_prompt_director_result(**overrides: object) -> PromptDirectorResult:
+    shot_prompts = overrides.pop("shot_prompts", None)
+    if shot_prompts is None:
+        shot_prompts = [make_shot_prompt(shot_number=1), make_shot_prompt(shot_number=2)]
+    return PromptDirectorResult(shot_prompts=shot_prompts, **overrides)
+
+
+def make_prompt_director_agent_run_result(
+    **overrides: object,
+) -> AgentRunResult[PromptDirectorResult]:
+    defaults: dict[str, object] = {
+        "output": make_prompt_director_result(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 1515,
+        "attempts": 1,
+        "prompt_tokens": 130,
+        "completion_tokens": 140,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)
