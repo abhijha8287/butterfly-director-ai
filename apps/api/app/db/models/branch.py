@@ -13,6 +13,7 @@ from app.db.models.mixins import SoftDeleteMixin, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
     from app.db.models.agent_log import AgentLog
+    from app.db.models.character_branch_state import CharacterBranchState
     from app.db.models.job import Job
     from app.db.models.movie import Movie
     from app.db.models.prompt_history import PromptHistory
@@ -69,3 +70,4 @@ class Branch(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
     jobs: Mapped[list["Job"]] = relationship(back_populates="branch")
     agent_logs: Mapped[list["AgentLog"]] = relationship(back_populates="branch")
     prompt_history: Mapped[list["PromptHistory"]] = relationship(back_populates="branch")
+    character_states: Mapped[list["CharacterBranchState"]] = relationship(back_populates="branch")

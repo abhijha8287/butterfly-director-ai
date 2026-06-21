@@ -11,6 +11,7 @@ from app.db.models.mixins import SoftDeleteMixin, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
     from app.db.models.asset import Asset
+    from app.db.models.character_branch_state import CharacterBranchState
     from app.db.models.project import Project
     from app.db.models.story import Story
 
@@ -46,3 +47,4 @@ class Character(UUIDPKMixin, TimestampMixin, SoftDeleteMixin, Base):
     project: Mapped["Project | None"] = relationship(back_populates="characters")
     story: Mapped["Story | None"] = relationship(back_populates="characters")
     visual_reference_asset: Mapped["Asset | None"] = relationship()
+    branch_states: Mapped[list["CharacterBranchState"]] = relationship(back_populates="character")

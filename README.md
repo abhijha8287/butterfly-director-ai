@@ -13,9 +13,9 @@ the same reference pattern established by the **Story Architect Agent** (the fir
 shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` for the
 approved design decisions.
 
-> Status: Story Architect, Character Architect, Decision Detector, and Timeline
-> Generator Agents are complete and live-verified. Remaining agents (Character Memory,
-> Storyboard, Prompt Director, Video, Voice, Music, Editor) are built incrementally,
+> Status: Story Architect, Character Architect, Decision Detector, Timeline Generator,
+> and Character Memory Agents are complete and live-verified. Remaining agents
+> (Storyboard, Prompt Director, Video, Voice, Music, Editor) are built incrementally,
 > one at a time, on top of this foundation.
 
 ---
@@ -137,6 +137,39 @@ The branches this creates are ordinary `Branch` rows - inspect them with the
 already-existing `GET /v1/branches?timeline_id=` or `GET /v1/timelines/{id}/tree`
 endpoints, no new read endpoints were needed.
 
+### Try the Character Memory Agent
+
+Unlike the other four, this one takes only a `branch_id` - it resolves its own
+character roster and branch context from already-persisted rows:
+
+```bash
+curl -X POST http://localhost:8000/v1/character-memory/generate \
+  -H "Content-Type: application/json" \
+  -d '{"branch_id": "<branch_id from /v1/timelines/generate-branches above>"}'
+```
+
+This loads the branch's timeline, finds every `Character` row for that timeline's
+`story_id`, and for each one resolves what changed in this specific universe
+(`knowledge_state`, `emotional_state`, `relationship_changes`, `goal_shift`,
+`physical_state`) plus a `drift_severity`/`drift_warning` judgment against that
+character's locked `canonical_traits` - flagging when a branch pushes a character to
+act in a way that contradicts who they fundamentally are. Persists one
+`CharacterBranchState` row per (character, branch) pair; re-running for the same
+branch updates the existing rows instead of duplicating them. A story with no
+characters yet (Character Architect hasn't run) is a valid state - it returns an
+empty result without spending an LLM call. Or run the standalone demo, which runs the
+full pipeline built so far end to end (it creates its own demo Project):
+
+```bash
+docker compose exec api python -m app.demo.character_memory
+```
+
+The states this creates are ordinary `CharacterBranchState` rows, readable via
+`GET /v1/character-memory?branch_id=` or `GET /v1/character-memory?character_id=` -
+this agent owns its own router prefix since there's no pre-existing generic CRUD
+resource for character/branch consistency records to share with, unlike Timeline
+Generator.
+
 ### Stopping / resetting
 
 ```bash
@@ -215,17 +248,21 @@ app/
 ├── db/
 │   ├── base.py                    Async SQLAlchemy engine/session factory
 │   ├── models/                    SQLAlchemy ORM models: project, story, character,
-│   │                              decision_point, timeline, branch, movie, asset, job,
-│   │                              agent_log, prompt_history, enums, mixins (timestamps/
-│   │                              soft-delete). story.project_id and character.project_id
-│   │                              are both nullable (agents generate them standalone,
-│   │                              before any Project exists); character.story_id and
-│   │                              decision_point.story_id link generated rows back to
-│   │                              the Story they were built from.
+│   │                              character_branch_state, decision_point, timeline,
+│   │                              branch, movie, asset, job, agent_log, prompt_history,
+│   │                              enums, mixins (timestamps/soft-delete). story.project_id
+│   │                              and character.project_id are both nullable (agents
+│   │                              generate them standalone, before any Project exists);
+│   │                              character.story_id and decision_point.story_id link
+│   │                              generated rows back to the Story they were built from.
+│   │                              character_branch_state has first-class drift_severity
+│   │                              (enum) + drift_warning columns (queryable) alongside a
+│   │                              state_diff JSONB blob for the descriptive fields, and a
+│   │                              unique(character_id, branch_id) constraint.
 │   └── migrations/                Alembic migrations (initial schema, butterfly-score
 │                                   fields, nullable story.project_id + generation_metadata,
 │                                   nullable character.project_id + story_id + generation_metadata,
-│                                   new decision_points table)
+│                                   new decision_points table, new character_branch_states table)
 │
 ├── repositories/                  One repository per model — thin async CRUD wrappers
 │                                  over SQLAlchemy (BaseRepository[Model] generic base)
@@ -245,7 +282,12 @@ app/
 │                                  create(), which already handles depth, the sibling cap, and
 │                                  butterfly-score recompute) rather than writing rows directly -
 │                                  it also lazily get-or-creates the Timeline + root Branch for a
-│                                  (project_id, story_id) pair on first use.
+│                                  (project_id, story_id) pair on first use. character_memory_service.py
+│                                  takes only a branch_id and resolves its own roster + branch
+│                                  context from already-persisted rows; reruns for the same branch
+│                                  update the existing CharacterBranchState rows instead of
+│                                  duplicating them (the table's unique(character_id, branch_id)
+│                                  constraint would otherwise reject a second insert).
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -316,18 +358,37 @@ app/
 │       │                            retries the agent rather than warning. Thin
 │       │                            affected_characters / blank ending_divergence warn only.
 │       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│   └── character_memory/           Fifth agent — resolves per-character continuity for
+│       │                            one branch and flags drift against canonical_traits
+│       ├── agent.py                 CharacterMemoryAgent: identical shape to the other
+│       │                            four agents (ChatOpenAI + PydanticOutputParser +
+│       │                            self-driven repair loop), but temperature=0.4 - this
+│       │                            is a consistency-checking task, not a creative one
+│       ├── schema.py                CharacterMemoryRequest (BranchContext + canonical
+│       │                            CharacterMemoryProfile roster in) + CharacterStateDiff
+│       │                            (knowledge_state, emotional_state,
+│       │                            relationship_changes, goal_shift, physical_state, plus
+│       │                            drift_severity/drift_warning) + CharacterMemoryResult
+│       ├── validators.py            Hard checks: exactly one CharacterStateDiff per
+│       │                            input character, matched by character_name (mirrors
+│       │                            Timeline Generator's candidate_label mapping); any
+│       │                            drift_severity != "none" without a drift_warning
+│       │                            retries the agent. Thin state_diff content / a stray
+│       │                            drift_warning on drift_severity="none" warn only.
+│       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
 │                                   character_architect -> decision_detector -> END. Each
 │                                   downstream node reads the story node's StoryBible
-│                                   directly out of graph state. Timeline Generator is
-│                                   deliberately NOT in this graph - it persists to a real
-│                                   Project/Timeline/Branch graph (DB side effects requiring
-│                                   a project_id), which doesn't fit this graph's
-│                                   pure-in-memory-agent-chaining design; it's invoked via
-│                                   its own service instead. Future LLM-only agents extend
-│                                   this graph; DB-writing agents follow timeline_generator's
+│                                   directly out of graph state. Timeline Generator and
+│                                   Character Memory are deliberately NOT in this graph -
+│                                   both persist real DB side effects (a Project/Timeline/
+│                                   Branch graph, and CharacterBranchState rows keyed off a
+│                                   branch_id), which doesn't fit this graph's
+│                                   pure-in-memory-agent-chaining design; both are invoked
+│                                   via their own service instead. Future LLM-only agents
+│                                   extend this graph; DB-writing agents follow that
 │                                   service-only pattern.
 │
 ├── integrations/
@@ -363,11 +424,17 @@ app/
     ├── decision_detector.py         python -m app.demo.decision_detector — chains
     │                                Story Architect into Decision Detector against
     │                                the live API and pretty-prints the resulting forks
-    └── timeline_generator.py        python -m app.demo.timeline_generator — runs the
-                                     full pipeline built so far (Story -> Decision ->
-                                     Timeline) against a real DB session (creates its
-                                     own demo Project), prints the created branches
-                                     with their computed butterfly scores
+    ├── timeline_generator.py        python -m app.demo.timeline_generator — runs the
+    │                                full pipeline built so far (Story -> Decision ->
+    │                                Timeline) against a real DB session (creates its
+    │                                own demo Project), prints the created branches
+    │                                with their computed butterfly scores
+    └── character_memory.py          python -m app.demo.character_memory — runs the
+                                     full pipeline built so far (Story -> Character ->
+                                     Decision -> Timeline -> Character Memory) against a
+                                     real DB session (creates its own demo Project),
+                                     prints each character's resolved state_diff +
+                                     drift judgment for the first generated branch
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -386,8 +453,9 @@ tests/
 │                                      event loop created it; pytest-asyncio gives each
 │                                      test its own loop)
 ├── factories.py                    Shared fake StoryBible/CharacterRoster/DecisionList/
-│                                    TimelineGenerationResult/AgentRunResult builders, reused
-│                                    across agents/services/routers/graph tests
+│                                    TimelineGenerationResult/CharacterMemoryResult/
+│                                    AgentRunResult builders, reused across
+│                                    agents/services/routers/graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
@@ -407,7 +475,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -439,6 +507,10 @@ All routes are mounted under `/v1`.
 | GET | `/v1/decision?story_id=` | Cursor-paginated list of detected decision points, optionally filtered by story |
 | DELETE | `/v1/decision/{id}` | Soft-delete a detected decision point |
 | POST | `/v1/timelines/generate-branches` | Run the Timeline Generator Agent on a `decision_id`; persists and returns one `Branch` per `branch_candidate`, with scores computed |
+| POST | `/v1/character-memory/generate` | Run the Character Memory Agent on a `branch_id`; persists and returns one `CharacterStateRead` per character in that branch's story |
+| GET | `/v1/character-memory/{id}` | Fetch one persisted character/branch state by id |
+| GET | `/v1/character-memory?branch_id=&character_id=` | Cursor-paginated list of persisted states, optionally filtered by branch and/or character |
+| DELETE | `/v1/character-memory/{id}` | Soft-delete a persisted character/branch state |
 | `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created, no new read endpoints needed |
 
 ### Example: generate a story, then its cast, its forks, and its branches
@@ -467,7 +539,12 @@ curl -X POST http://localhost:8000/v1/projects \
 curl -X POST http://localhost:8000/v1/timelines/generate-branches \
   -H "Content-Type: application/json" \
   -d '{"project_id": "<project_id>", "story_id": "<story_id>", "decision_id": "<decision_id>"}'
-# -> {"timeline_id": "<timeline_id>", "branches": [{"butterfly_score": 65, ...}, ...], ...}
+# -> {"timeline_id": "<timeline_id>", "branches": [{"id": "<branch_id>", "butterfly_score": 65, ...}, ...], ...}
+
+curl -X POST http://localhost:8000/v1/character-memory/generate \
+  -H "Content-Type: application/json" \
+  -d '{"branch_id": "<branch_id>"}'
+# -> {"branch_id": "<branch_id>", "states": [{"character_name": "...", "drift_severity": "none", ...}, ...], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -480,9 +557,13 @@ entries (each with 2-4 `branch_candidates`, every candidate carrying a `label`,
 returns a `TimelineGenerateBranchesResponse`: the resolved `timeline_id` plus one
 `BranchRead` per candidate - the existing `BranchRead` shape already has
 `butterfly_score`/`probability`/`confidence_score`/`stability_explanation`, now
-populated with real values instead of structural-baseline ones. All four share the
-same generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`,
-token counts).
+populated with real values instead of structural-baseline ones. Character Memory
+generate returns a `CharacterMemoryGenerateResponse`: the resolved `story_id` plus one
+`CharacterStateRead` per character in that story (`state_diff`, `drift_severity`,
+`drift_warning`). All five share the same generation-provenance shape (`model`,
+`prompt_version`, `latency_ms`, `attempts`, token counts) - Character Memory's is all
+zero/`"n/a"` in the one case where it skips the LLM call entirely (a story with no
+characters yet).
 
 ---
 
@@ -507,11 +588,11 @@ See `.env.example` for the full, documented list. The essentials:
 
 ## Known limitations
 
-- Only the **Story Architect**, **Character Architect**, **Decision Detector**, and
-  **Timeline Generator** Agents are implemented end-to-end so far. Downstream agents
-  (Character Memory, Storyboard, Prompt Director, Video, Voice, Music, Editor) are
-  designed in `ARCHITECTURE.md` but not yet built — they're added one at a time, each
-  following the Story Architect's reference pattern in `app/agents/`.
+- Only the **Story Architect**, **Character Architect**, **Decision Detector**,
+  **Timeline Generator**, and **Character Memory** Agents are implemented end-to-end
+  so far. Downstream agents (Storyboard, Prompt Director, Video, Voice, Music, Editor)
+  are designed in `ARCHITECTURE.md` but not yet built — they're added one at a time,
+  each following the Story Architect's reference pattern in `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
@@ -549,6 +630,15 @@ See `.env.example` for the full, documented list. The essentials:
   loops over every decision in a `DecisionList` and fans out automatically, and no
   handling yet for the "zero decisions -> single-branch linear timeline" finalization
   case beyond the root branch that's lazily created on first use.
+- `CharacterMemoryAgent` resolves drift purely via the LLM's judgment against
+  `canonical_traits` text - `ARCHITECTURE.md` also specifies Qdrant-backed embedding
+  similarity checks across sibling branches for consistency, which isn't wired up in
+  this build (no Qdrant integration exists yet; `Character.embedding_id` stays unset).
+- `CharacterMemoryAgent` runs once per `branch_id` you explicitly pass in - like
+  Timeline Generator, there's no orchestration yet that automatically runs it for
+  every newly created branch. Re-running it for the same branch updates the existing
+  `CharacterBranchState` rows in place rather than creating duplicates or erroring on
+  the table's unique constraint.
 - The Celery `worker` binds to every queue in a single process for this build
   (per the approved design doc); splitting into dedicated per-queue worker pools is a
   `docker-compose.yml` change, not a code change.

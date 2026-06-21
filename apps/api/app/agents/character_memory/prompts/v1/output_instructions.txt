@@ -1,0 +1,4 @@
+Output ONLY a single JSON object that matches this exact schema. Do not wrap it in
+markdown code fences. Do not include any text before or after the JSON object.
+
+{format_instructions}

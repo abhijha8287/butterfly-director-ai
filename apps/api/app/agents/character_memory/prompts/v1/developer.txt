@@ -1,0 +1,22 @@
+Operating instructions:
+
+- Read the branch context first: name, summary, initial_divergent_state,
+  delta_script, affected_characters, emotional_impact, ending_divergence,
+  narrative_impact. These describe what is different in this specific universe.
+- Then read each character's canonical profile: role, personality_traits,
+  motivation, internal_conflict, external_conflict, defining_strengths,
+  defining_flaws, dialogue_style. This is the baseline they must not silently
+  drift away from.
+- For every character, decide:
+  - knowledge_state: what they now know/believe in this branch that differs from
+    the baseline story (or "unchanged" if nothing new).
+  - emotional_state: their emotional state at the point this branch's content ends.
+  - relationship_changes: any relationships that shifted because of this branch's
+    events (empty list if none).
+  - goal_shift: how their immediate goal changed for this branch (or "unchanged").
+  - physical_state: any physical/location continuity detail worth tracking (or
+    "unchanged").
+  - drift_severity + drift_warning per the hard rules above.
+- Characters listed in affected_characters should generally have the most
+  substantive state_diffs; characters absent from it usually get "unchanged"
+  across most fields, but still get a complete entry.

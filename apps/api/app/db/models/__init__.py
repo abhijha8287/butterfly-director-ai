@@ -2,6 +2,7 @@ from app.db.models.agent_log import AgentLog
 from app.db.models.asset import Asset
 from app.db.models.branch import Branch
 from app.db.models.character import Character
+from app.db.models.character_branch_state import CharacterBranchState
 from app.db.models.decision_point import DecisionPoint
 from app.db.models.job import Job
 from app.db.models.movie import Movie
@@ -15,6 +16,7 @@ __all__ = [
     "Asset",
     "Branch",
     "Character",
+    "CharacterBranchState",
     "DecisionPoint",
     "Job",
     "Movie",

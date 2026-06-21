@@ -107,3 +107,9 @@ class PromptProvider(str, enum.Enum):
     QWEN = "qwen"
     WAN = "wan"
     HAPPYHORSE = "happyhorse"
+
+
+class DriftSeverity(str, enum.Enum):
+    NONE = "none"
+    MINOR = "minor"
+    MAJOR = "major"

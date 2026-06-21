@@ -1,5 +1,12 @@
 from app.agents.base.agent_result import AgentRunResult
 from app.agents.character_architect.schema import CharacterProfile, CharacterRoster, VoiceProfile
+from app.agents.character_memory.schema import (
+    BranchContext,
+    CharacterMemoryProfile,
+    CharacterMemoryRequest,
+    CharacterMemoryResult,
+    CharacterStateDiff,
+)
 from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
 from app.agents.story_architect.schema import StoryBible
 from app.agents.timeline_generator.schema import BranchDraft, TimelineGenerationResult
@@ -200,6 +207,92 @@ def make_timeline_agent_run_result(**overrides: object) -> AgentRunResult[Timeli
         "attempts": 1,
         "prompt_tokens": 70,
         "completion_tokens": 80,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_CHARACTER_MEMORY_PROFILE_KWARGS: dict[str, object] = {
+    "name": "Hero",
+    "role": "protagonist",
+    "personality_traits": ["determined"],
+    "motivation": "To find the truth.",
+    "internal_conflict": "Fear of repeating the past.",
+    "external_conflict": "Hunted by old allies.",
+    "defining_strengths": ["resourceful"],
+    "defining_flaws": ["stubborn"],
+    "dialogue_style": "Short, clipped sentences.",
+}
+
+
+def make_character_memory_profile(**overrides: object) -> CharacterMemoryProfile:
+    kwargs = dict(VALID_CHARACTER_MEMORY_PROFILE_KWARGS)
+    kwargs.update(overrides)
+    return CharacterMemoryProfile(**kwargs)
+
+
+VALID_BRANCH_CONTEXT_KWARGS: dict[str, object] = {
+    "name": "Universe: Rescue",
+    "summary": "She shouts and is rescued.",
+    "initial_divergent_state": "Help has been alerted.",
+    "delta_script": "INT. ALLEY - NIGHT\nShe screams. Footsteps approach.",
+    "affected_characters": ["Hero"],
+    "emotional_impact": "Relief.",
+    "ending_divergence": "A hopeful ending becomes likely.",
+    "narrative_impact": "Introduces a rescuer subplot.",
+}
+
+
+def make_branch_context(**overrides: object) -> BranchContext:
+    kwargs = dict(VALID_BRANCH_CONTEXT_KWARGS)
+    kwargs.update(overrides)
+    return BranchContext(**kwargs)
+
+
+VALID_CHARACTER_STATE_DIFF_KWARGS: dict[str, object] = {
+    "character_name": "Hero",
+    "knowledge_state": "Knows help is coming.",
+    "emotional_state": "Relieved but shaken.",
+    "relationship_changes": [],
+    "goal_shift": "unchanged",
+    "physical_state": "Minor bruising from the struggle.",
+    "drift_severity": "none",
+    "drift_warning": None,
+}
+
+
+def make_character_state_diff(**overrides: object) -> CharacterStateDiff:
+    kwargs = dict(VALID_CHARACTER_STATE_DIFF_KWARGS)
+    kwargs.update(overrides)
+    return CharacterStateDiff(**kwargs)
+
+
+def make_character_memory_request(**overrides: object) -> CharacterMemoryRequest:
+    branch = overrides.pop("branch", None) or make_branch_context()
+    characters = overrides.pop("characters", None)
+    if characters is None:
+        characters = [make_character_memory_profile()]
+    return CharacterMemoryRequest(branch=branch, characters=characters, **overrides)
+
+
+def make_character_memory_result(**overrides: object) -> CharacterMemoryResult:
+    character_states = overrides.pop("character_states", None)
+    if character_states is None:
+        character_states = [make_character_state_diff()]
+    return CharacterMemoryResult(character_states=character_states, **overrides)
+
+
+def make_character_memory_agent_run_result(
+    **overrides: object,
+) -> AgentRunResult[CharacterMemoryResult]:
+    defaults: dict[str, object] = {
+        "output": make_character_memory_result(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 1213,
+        "attempts": 1,
+        "prompt_tokens": 90,
+        "completion_tokens": 100,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)
