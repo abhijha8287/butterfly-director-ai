@@ -1,0 +1,16 @@
+Operating instructions:
+
+- Read the StoryBible's genre and tone first - they set the overall sonic palette
+  (e.g. a "thriller" with a "tense" tone calls for different instrumentation than a
+  "romance" with a "wistful" tone).
+- Read the branch's summary next - it's the emotional throughline for this universe
+  and should inform how the score evolves across the branch.
+- Walk the shots in ascending shot_number order and group consecutive shots that
+  share the same emotional beat into a single cue; start a new cue when the
+  emotional beat shifts (e.g. tension breaking into relief, or calm escalating
+  into danger).
+- Use each shot's description as the source of that beat's emotion - infer it from
+  the action described, not from camera direction.
+- Keep generation_prompt vendor-neutral and self-contained: instrumentation, mood,
+  tempo, and genre, written as if handed directly to a text-to-music model with zero
+  other context about the story.

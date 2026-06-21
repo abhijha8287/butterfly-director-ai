@@ -10,6 +10,15 @@ from app.agents.character_memory.schema import (
     CharacterStateDiff,
 )
 from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
+from app.agents.music.schema import (
+    MusicAgentResult,
+    MusicCue,
+    MusicCueFailure,
+    MusicCueResult,
+    MusicRequest,
+    MusicScript,
+    MusicShotScript,
+)
 from app.agents.prompt_director.schema import (
     CharacterVisualProfile,
     PromptDirectorRequest,
@@ -669,6 +678,113 @@ def make_voice_agent_result(**overrides: object) -> VoiceAgentResult:
 def make_voice_agent_run_result(**overrides: object) -> AgentRunResult[VoiceAgentResult]:
     defaults: dict[str, object] = {
         "output": make_voice_agent_result(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 1717,
+        "attempts": 1,
+        "prompt_tokens": 150,
+        "completion_tokens": 160,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_MUSIC_SHOT_SCRIPT_KWARGS: dict[str, object] = {
+    "scene": "INT. ALLEY - NIGHT",
+    "shot_number": 1,
+    "description": "She screams. Footsteps approach.",
+    "duration_seconds": 4.5,
+}
+
+
+def make_music_shot_script(**overrides: object) -> MusicShotScript:
+    kwargs = dict(VALID_MUSIC_SHOT_SCRIPT_KWARGS)
+    kwargs.update(overrides)
+    return MusicShotScript(**kwargs)
+
+
+def make_music_request(**overrides: object) -> MusicRequest:
+    story_bible = overrides.pop("story_bible", None) or make_story_bible()
+    shots = overrides.pop("shots", None)
+    if shots is None:
+        shots = [make_music_shot_script()]
+    defaults: dict[str, object] = {
+        "branch_name": "Universe: Rescue",
+        "branch_summary": "She shouts and is rescued.",
+    }
+    defaults.update(overrides)
+    return MusicRequest(story_bible=story_bible, shots=shots, **defaults)
+
+
+VALID_MUSIC_CUE_KWARGS: dict[str, object] = {
+    "start_shot_number": 1,
+    "end_shot_number": 1,
+    "mood": "tense, rising dread",
+    "tempo_bpm": 110,
+    "generation_prompt": "Dark ambient drone, low strings, slow building tension, 110bpm.",
+}
+
+
+def make_music_cue(**overrides: object) -> MusicCue:
+    kwargs = dict(VALID_MUSIC_CUE_KWARGS)
+    kwargs.update(overrides)
+    return MusicCue(**kwargs)
+
+
+def make_music_script(**overrides: object) -> MusicScript:
+    cues = overrides.pop("cues", None)
+    if cues is None:
+        cues = [make_music_cue()]
+    return MusicScript(cues=cues, **overrides)
+
+
+VALID_MUSIC_CUE_RESULT_KWARGS: dict[str, object] = {
+    "start_shot_number": 1,
+    "end_shot_number": 1,
+    "mood": "tense, rising dread",
+    "tempo_bpm": 110,
+    "generation_prompt": "Dark ambient drone, low strings, slow building tension, 110bpm.",
+    "provider": "happyhorse",
+    "attempts": 1,
+}
+
+
+def make_music_cue_result(**overrides: object) -> MusicCueResult:
+    kwargs = dict(VALID_MUSIC_CUE_RESULT_KWARGS)
+    kwargs.update(overrides)
+    return MusicCueResult(**kwargs)
+
+
+VALID_MUSIC_CUE_FAILURE_KWARGS: dict[str, object] = {
+    "start_shot_number": 1,
+    "end_shot_number": 1,
+    "mood": "tense, rising dread",
+    "tempo_bpm": 110,
+    "generation_prompt": "Dark ambient drone, low strings, slow building tension, 110bpm.",
+    "attempts": 3,
+    "error": "HappyHorse task abc123 timed out",
+}
+
+
+def make_music_cue_failure(**overrides: object) -> MusicCueFailure:
+    kwargs = dict(VALID_MUSIC_CUE_FAILURE_KWARGS)
+    kwargs.update(overrides)
+    return MusicCueFailure(**kwargs)
+
+
+def make_music_agent_result(**overrides: object) -> MusicAgentResult:
+    cues = overrides.pop("cues", None)
+    if cues is None:
+        cues = [make_music_cue_result()]
+    failed_cues = overrides.pop("failed_cues", None)
+    if failed_cues is None:
+        failed_cues = []
+    return MusicAgentResult(cues=cues, failed_cues=failed_cues, **overrides)
+
+
+def make_music_agent_run_result(**overrides: object) -> AgentRunResult[MusicAgentResult]:
+    defaults: dict[str, object] = {
+        "output": make_music_agent_result(),
         "model": "qwen-plus",
         "prompt_version": "v1",
         "latency_ms": 1717,

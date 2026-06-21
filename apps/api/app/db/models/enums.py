@@ -108,6 +108,7 @@ class PromptProvider(str, enum.Enum):
     WAN = "wan"
     HAPPYHORSE = "happyhorse"
     DASHSCOPE = "dashscope"
+    NONE = "none"
 
 
 class DriftSeverity(str, enum.Enum):

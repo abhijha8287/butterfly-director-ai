@@ -14,9 +14,9 @@ shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` fo
 approved design decisions.
 
 > Status: Story Architect, Character Architect, Decision Detector, Timeline Generator,
-> Character Memory, Storyboard, Prompt Director, Video Generation, and Voice Agents
-> are complete and live-verified. Remaining agents (Music, Editor) are built
-> incrementally, one at a time, on top of this foundation.
+> Character Memory, Storyboard, Prompt Director, Video Generation, Voice, and Music
+> Agents are complete and live-verified. The remaining Editor agent is built
+> incrementally, on top of this foundation.
 
 ---
 
@@ -308,6 +308,44 @@ The synthesized lines this creates are readable via the already-existing
 outcome is also visible via `GET /v1/prompt-history?branch_id=` - no new read
 endpoints were needed.
 
+### Try the Music Agent
+
+Also takes a `storyboard_version_id`, same as Prompt Director/Video Generation/Voice:
+
+```bash
+curl -X POST http://localhost:8000/v1/assets/generate-music \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id from /v1/storyboard/generate above>"}'
+```
+
+Like Voice, this combines an LLM step and a provider step in one call - but unlike
+Voice, the provider step is genuinely optional. The LLM (ChatOpenAI + the same
+repair-loop shape every text agent uses) reads the branch's tone/genre, summary, and
+ordered shots, then writes one or more `MusicCue`s - each a contiguous range of
+shots sharing an emotional beat, with a `mood`, a `tempo_bpm`, and a self-contained
+`generation_prompt` ready for a text-to-music provider. `MUSIC_PROVIDER` defaults to
+`none` (no real DashScope music-generation API exists, unlike Qwen/Wan/CosyVoice) -
+with no provider configured, every cue is still extracted and persisted with its
+prompt/mood/tempo, just without an actual rendered stem; synthesis is skipped, never
+treated as a failure. Set `MUSIC_PROVIDER=happyhorse` (with `HAPPYHORSE_BASE_URL`/
+`HAPPYHORSE_API_KEY` configured) to actually synthesize stems, fanned out
+concurrently with the same per-item retry/back-off shape Voice/Video Generation use.
+Persists one new `prompt_history` row per cue (`stage=music`) and, only when a stem
+was actually synthesized, one `Asset` (`kind=audio`) per cue - a cue with no provider
+configured gets a `null` `asset` in the response rather than a placeholder. A cue
+that exhausts its synthesis attempts is reported as a failure alongside whatever
+other cues synthesized fine. Or run the standalone demo, which runs the full
+pipeline built so far end to end (it creates its own demo Project):
+
+```bash
+docker compose exec api python -m app.demo.music
+```
+
+The synthesized cues this creates are readable via the already-existing
+`GET /v1/assets?project_id=` or `GET /v1/assets/{asset_id}` endpoints, and each cue's
+outcome is also visible via `GET /v1/prompt-history?branch_id=` - no new read
+endpoints were needed.
+
 ### Stopping / resetting
 
 ```bash
@@ -458,6 +496,13 @@ app/
 │                                  from the agent's combined output, then writes the raw audio bytes
 │                                  to local disk under settings.media_root since (unlike Wan's
 │                                  video_url) the TTS providers return bytes with nowhere else to go.
+│                                  music_service.py follows the same combined-output shape as
+│                                  voice_service.py (stage=music PromptHistory rows written fresh),
+│                                  but branches per cue on which of audio_bytes/audio_url is
+│                                  populated - bytes get written to local disk like Voice, a url gets
+│                                  stored directly as Asset.oss_key like Wan's video_url, and neither
+│                                  populated (no MusicGenerationProvider configured) means the cue is
+│                                  persisted with no Asset row at all (asset=None in the response).
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -632,6 +677,32 @@ app/
 │       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │                                    (only covers the LLM extraction phase - synthesis
 │                                    has no prompt template, it's a direct provider call)
+│   └── music/                      Tenth agent — scores a branch with one or more
+│       │                            music cues spanning contiguous shot ranges, then
+│       │                            optionally synthesizes each cue
+│       ├── agent.py                 MusicAgent: same combined-phase shape as Voice -
+│       │                            an LLM call writes MusicCues, then a provider
+│       │                            call per cue. Unlike Voice, the provider is
+│       │                            genuinely optional (MUSIC_PROVIDER defaults to
+│       │                            "none" - no real DashScope music API exists);
+│       │                            with no provider configured every cue is still
+│       │                            extracted and persisted, just with attempts=0
+│       │                            and no audio, never treated as a failure
+│       ├── schema.py                MusicRequest (StoryBible + branch_summary +
+│       │                            MusicShotScript[] in) + MusicCue/MusicScript
+│       │                            (LLM output contract, a cue spans
+│       │                            start_shot_number..end_shot_number) +
+│       │                            MusicCueResult / MusicCueFailure + MusicAgentResult
+│       ├── validators.py            Hard check: every cue's start/end shot_number
+│       │                            must match a real input shot, and end must not
+│       │                            precede start - this mapping is load-bearing for
+│       │                            persistence. An empty `cues` list is structurally
+│       │                            valid (mirrors Voice's zero-lines case) but the
+│       │                            system prompt steers the model to default to
+│       │                            scoring the whole branch, so it only warns
+│       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│                                    (only covers the LLM scoring phase - synthesis
+│                                    has no prompt template, it's a direct provider call)
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
@@ -716,12 +787,20 @@ app/
     │                                against a real DB session (creates its own demo
     │                                Project), prints the rendered (or failed) outcome
     │                                for each shot of the first generated branch
-    └── voice.py                     python -m app.demo.voice — runs the full pipeline
+    ├── voice.py                     python -m app.demo.voice — runs the full pipeline
+    │                                built so far (Story -> Character -> Decision ->
+    │                                Timeline -> Character Memory -> Storyboard ->
+    │                                Prompt Director -> Video Generation -> Voice)
+    │                                against a real DB session (creates its own demo
+    │                                Project), prints the extracted dialogue lines and
+    │                                their synthesis outcome for the first generated
+    │                                branch
+    └── music.py                     python -m app.demo.music — runs the full pipeline
                                      built so far (Story -> Character -> Decision ->
                                      Timeline -> Character Memory -> Storyboard ->
-                                     Prompt Director -> Video Generation -> Voice)
-                                     against a real DB session (creates its own demo
-                                     Project), prints the extracted dialogue lines and
+                                     Prompt Director -> Video Generation -> Voice ->
+                                     Music) against a real DB session (creates its own
+                                     demo Project), prints the extracted music cues and
                                      their synthesis outcome for the first generated
                                      branch
 ```
@@ -745,8 +824,8 @@ tests/
 │                                    TimelineGenerationResult/CharacterMemoryResult/
 │                                    StoryboardResult/PromptDirectorResult/
 │                                    VideoGenerationAgentResult/VoiceAgentResult/
-│                                    AgentRunResult builders, reused across
-│                                    agents/services/routers/graph tests
+│                                    MusicAgentResult/AgentRunResult builders, reused
+│                                    across agents/services/routers/graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
@@ -766,7 +845,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py tests/agents/test_prompt_director_live.py tests/agents/test_video_generation_live.py tests/agents/test_voice_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py tests/agents/test_prompt_director_live.py tests/agents/test_video_generation_live.py tests/agents/test_voice_live.py tests/agents/test_music_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -809,7 +888,8 @@ All routes are mounted under `/v1`.
 | POST | `/v1/prompt-history/generate` | Run the Prompt Director Agent on a `storyboard_version_id`; persists and returns one `PromptHistoryRead` per shot |
 | POST | `/v1/assets/render-shots` | Run the Video Generation Agent on a `storyboard_version_id`; persists and returns one `Asset` per rendered shot, plus any failed shots |
 | POST | `/v1/assets/synthesize-voice` | Run the Voice Agent on a `storyboard_version_id`; extracts dialogue lines, synthesizes each one, and persists and returns one `Asset` per rendered line, plus any failed lines |
-| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director and Voice created; `GET /v1/assets?project_id=` and `GET /v1/assets/{asset_id}` are how you read back what Video Generation and Voice created - no new read endpoints needed for any of them |
+| POST | `/v1/assets/generate-music` | Run the Music Agent on a `storyboard_version_id`; scores the branch with one or more cues and, if `MUSIC_PROVIDER` is configured, synthesizes each one - persists and returns one `Asset` per synthesized cue (`null` if no provider is configured), plus any failed cues |
+| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director, Voice, and Music created; `GET /v1/assets?project_id=` and `GET /v1/assets/{asset_id}` are how you read back what Video Generation, Voice, and Music created - no new read endpoints needed for any of them |
 
 ### Example: generate a story, then its cast, its forks, and its branches
 
@@ -863,6 +943,11 @@ curl -X POST http://localhost:8000/v1/assets/synthesize-voice \
   -H "Content-Type: application/json" \
   -d '{"storyboard_version_id": "<version_id>"}'
 # -> {"branch_id": "<branch_id>", "storyboard_version_id": "<version_id>", "lines": [{"shot_number": 1, "character_name": "...", "line_text": "...", "asset": {"oss_key": "/app/media/...mp3", ...}}, ...], "failed_lines": [], ...}
+
+curl -X POST http://localhost:8000/v1/assets/generate-music \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id>"}'
+# -> {"branch_id": "<branch_id>", "storyboard_version_id": "<version_id>", "cues": [{"start_shot_number": 1, "end_shot_number": 2, "mood": "...", "tempo_bpm": 110, "generation_prompt": "...", "asset": null}, ...], "failed_cues": [], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -893,13 +978,18 @@ retries). Voice synthesize returns a `VoiceGenerateResponse`: the resolved `bran
 and `storyboard_version_id`, plus `lines` (one rendered line per successfully
 synthesized line, each carrying its `shot_number`, `character_name`, `line_text`,
 `delivery_note`, and `asset`) and `failed_lines` (shot_number/character_name/
-attempts/error for any line that exhausted its synthesis retries). All nine share the
-same generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`,
-token counts) - Character Memory's is all zero/`"n/a"` in the one case where it skips
-the LLM call entirely (a story with no characters yet), and Video Generation's
-`prompt_tokens`/`completion_tokens` are simply absent from its response schema (not
-just `None`) since it never calls an LLM at all; its `prompt_version` is always the
-literal `"n/a"`.
+attempts/error for any line that exhausted its synthesis retries). Music generate
+returns a `MusicGenerateResponse`: the resolved `branch_id` and `storyboard_version_id`,
+plus `cues` (one rendered cue per extracted `MusicCue`, each carrying its
+`start_shot_number`/`end_shot_number`, `mood`, `tempo_bpm`, `generation_prompt`, and
+`asset` - `null` when no `MusicGenerationProvider` is configured) and `failed_cues`
+(only populated when a provider is configured and a cue's synthesis exhausted its
+retries). All ten share the same generation-provenance shape (`model`,
+`prompt_version`, `latency_ms`, `attempts`, token counts) - Character Memory's is all
+zero/`"n/a"` in the one case where it skips the LLM call entirely (a story with no
+characters yet), and Video Generation's `prompt_tokens`/`completion_tokens` are simply
+absent from its response schema (not just `None`) since it never calls an LLM at all;
+its `prompt_version` is always the literal `"n/a"`.
 
 ---
 
@@ -913,9 +1003,9 @@ See `.env.example` for the full, documented list. The essentials:
 - `QWEN_MODEL`, `WAN_MODEL`, `COSYVOICE_MODEL` — model selection per capability.
 - `VIDEO_PROVIDER`, `VOICE_PROVIDER`, `MUSIC_PROVIDER` — Strategy-pattern vendor
   selection (`wan`/`happyhorse`, `dashscope`/`happyhorse`, `happyhorse`/`none`).
-- `MEDIA_ROOT` (default `/app/media`) — local-disk directory the Voice Agent writes
-  synthesized audio files to, since CosyVoice/HappyHorse return raw bytes with no
-  hosted URL of their own (unlike Wan's video_url).
+- `MEDIA_ROOT` (default `/app/media`) — local-disk directory the Voice and Music
+  Agents write synthesized audio files to, since CosyVoice/HappyHorse return raw
+  bytes with no hosted URL of their own (unlike Wan's video_url).
 - `DECISION_BRANCH_CANDIDATES_MIN` / `_MAX` (default 2/4) — bounds how many branch
   candidates the Decision Detector Agent may produce per decision point, to cap
   multiverse fan-out cost downstream.
@@ -935,10 +1025,10 @@ See `.env.example` for the full, documented list. The essentials:
 
 - Only the **Story Architect**, **Character Architect**, **Decision Detector**,
   **Timeline Generator**, **Character Memory**, **Storyboard**, **Prompt
-  Director**, **Video Generation**, and **Voice** Agents are implemented end-to-end
-  so far. Downstream agents (Music, Editor) are designed in `ARCHITECTURE.md` but not
-  yet built — they're added one at a time, each following the Story Architect's
-  reference pattern in `app/agents/`.
+  Director**, **Video Generation**, **Voice**, and **Music** Agents are implemented
+  end-to-end so far. The remaining **Editor** Agent is designed in `ARCHITECTURE.md`
+  but not yet built — it's added on top of this foundation, following the Story
+  Architect's reference pattern in `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
@@ -1058,4 +1148,31 @@ See `.env.example` for the full, documented list. The essentials:
 - `VoiceAgent` runs once per `storyboard_version_id` you explicitly pass in, same as
   Prompt Director/Video Generation - no automatic orchestration yet. Re-running it
   inserts a fresh batch of `PromptHistory`/`Asset` rows (there's no upsert) rather
+  than replacing the previous batch.
+- `MUSIC_PROVIDER` defaults to `none` - no real DashScope music-generation API exists
+  in this build (unlike Qwen/Wan/CosyVoice), so `MusicAgent`'s provider call is
+  genuinely optional rather than always-on like Voice's. With no provider configured,
+  `MusicAgent` still extracts and persists every cue (mood/tempo/generation_prompt),
+  just with `attempts=0` and no `Asset` row - this is the literal architecture intent
+  ("generation prompts (and/or generated stems if provider supports it)"), not a
+  fallback or degraded mode.
+- Required adding `PromptProvider.NONE` to the `prompt_provider` enum (migration
+  `64be34de8b20`, an additive `ALTER TYPE ... ADD VALUE`, following the same pattern
+  as Voice's `DASHSCOPE` addition) since `MusicService` needs a provider value to
+  write on `PromptHistory` rows even when synthesis was skipped entirely.
+- `MusicAgent`'s cues span a contiguous range of shots (`start_shot_number` to
+  `end_shot_number`), not a single shot - a deliberate departure from every other
+  shot-scoped agent (Prompt Director, Video Generation, Voice), since a film score
+  is structurally a small number of cues per emotional beat, not one per shot.
+  `ARCHITECTURE.md` doesn't specify this shape explicitly; it's a new design decision
+  following the same "agent resolves its own input/output shape" precedent Voice set.
+- `MusicService` branches per cue on which of `audio_bytes`/`audio_url` the provider
+  result populated: bytes get written to local disk under `MEDIA_ROOT` like Voice
+  (real `size_bytes`/`checksum_sha256`), a URL gets stored directly as `Asset.oss_key`
+  like Wan's `video_url` (placeholder `size_bytes=0`/`checksum_sha256=None`), and
+  neither populated (no provider configured) means no `Asset` row is created at all -
+  the response's `asset` field is `null` for that cue.
+- `MusicAgent` runs once per `storyboard_version_id` you explicitly pass in, same as
+  Voice/Prompt Director/Video Generation - no automatic orchestration yet. Re-running
+  it inserts a fresh batch of `PromptHistory`/`Asset` rows (there's no upsert) rather
   than replacing the previous batch.

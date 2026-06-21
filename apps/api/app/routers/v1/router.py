@@ -11,6 +11,7 @@ from app.routers.v1 import (
     health,
     jobs,
     movies,
+    music,
     projects,
     prompt_director,
     prompt_history,
@@ -44,3 +45,4 @@ api_v1_router.include_router(prompt_history.router)
 api_v1_router.include_router(prompt_director.router)
 api_v1_router.include_router(video_generation.router)
 api_v1_router.include_router(voice.router)
+api_v1_router.include_router(music.router)
