@@ -8,6 +8,7 @@ from app.routers.v1 import (
     character_memory,
     characters,
     decision_detector,
+    editor,
     health,
     jobs,
     movies,
@@ -46,3 +47,4 @@ api_v1_router.include_router(prompt_director.router)
 api_v1_router.include_router(video_generation.router)
 api_v1_router.include_router(voice.router)
 api_v1_router.include_router(music.router)
+api_v1_router.include_router(editor.router)

@@ -13,10 +13,13 @@ the same reference pattern established by the **Story Architect Agent** (the fir
 shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` for the
 approved design decisions.
 
-> Status: Story Architect, Character Architect, Decision Detector, Timeline Generator,
-> Character Memory, Storyboard, Prompt Director, Video Generation, Voice, and Music
-> Agents are complete and live-verified. The remaining Editor agent is built
-> incrementally, on top of this foundation.
+> Status: All eleven agents `ARCHITECTURE.md` specifies are implemented - Story
+> Architect, Character Architect, Decision Detector, Timeline Generator, Character
+> Memory, Storyboard, Prompt Director, Video Generation, Voice, Music, and Editor.
+> Editor's ffmpeg composition is verified against real local media (see
+> `tests/integrations/`); a full end-to-end live run through every agent is currently
+> blocked by an unrelated DashScope/Wan account issue (403 on video-synthesis) - see
+> Known Limitations.
 
 ---
 
@@ -346,6 +349,45 @@ The synthesized cues this creates are readable via the already-existing
 outcome is also visible via `GET /v1/prompt-history?branch_id=` - no new read
 endpoints were needed.
 
+### Try the Editor Agent
+
+Also takes a `storyboard_version_id`, same as Prompt Director/Video Generation/Voice/
+Music - but requires Video Generation to have already run for it (a Movie row must
+exist for the branch):
+
+```bash
+curl -X POST http://localhost:8000/v1/assets/assemble-movie \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id from /v1/storyboard/generate above>"}'
+```
+
+The eleventh and final agent, and the only one that never calls an LLM *or* a remote
+provider - it shells out to a local ffmpeg binary. It reads every `SHOT_PROMPT`/
+`VOICE`/`MUSIC` PromptHistory row Video Generation/Voice/Music already wrote for this
+exact storyboard version, resolves each one's `Asset`, and skips anything that never
+rendered (a shot Wan failed to render, a voice line that exhausted its retries, a
+music cue with no provider configured) rather than blocking the whole assembly - the
+same graceful-degradation choice Storyboard/Prompt Director make for unresolved
+upstream state. Computes each included shot's cumulative start time (the sum of every
+preceding included shot's duration) so voice lines and music cues land at the right
+position in the final timeline, then builds one ffmpeg `filter_complex` graph that
+scales/concatenates the shots and `adelay`/`amix`-mixes in the audio tracks. Persists
+the assembled file as one `Asset` (`kind=video`, `owner_type=movie`), sets
+`movies.final_asset_id`, and moves `movies.status` to `completed`. Unlike every other
+agent, it writes no `prompt_history` rows of its own - there's no `editing`
+`PromptStage`, since this step is literal assembly, not prompt-driven generation. Or
+run the standalone demo, which runs the complete 11-agent pipeline end to end (it
+creates its own demo Project):
+
+```bash
+docker compose exec api python -m app.demo.editor
+```
+
+The final cut this creates is readable via the already-existing
+`GET /v1/assets?project_id=` or `GET /v1/assets/{asset_id}` endpoints, and the
+branch's overall status is visible via `GET /v1/movies/by-branch/{branch_id}` - no
+new read endpoints were needed.
+
 ### Stopping / resetting
 
 ```bash
@@ -503,6 +545,14 @@ app/
 │                                  stored directly as Asset.oss_key like Wan's video_url, and neither
 │                                  populated (no MusicGenerationProvider configured) means the cue is
 │                                  persisted with no Asset row at all (asset=None in the response).
+│                                  editor_service.py is the only service that writes no PromptHistory
+│                                  rows of its own - it only *reads* the SHOT_PROMPT/VOICE/MUSIC rows
+│                                  the upstream agents already wrote for the exact storyboard version,
+│                                  resolving each shot's Asset, computing every shot's cumulative
+│                                  start time (skipping any shot/line/cue that never rendered), and
+│                                  handing the assembled EditorRequest to EditorAgent. On success,
+│                                  writes one Asset (kind=video, owner_type=movie) for the final cut,
+│                                  sets movies.final_asset_id, and moves movies.status to completed.
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -703,6 +753,23 @@ app/
 │       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │                                    (only covers the LLM scoring phase - synthesis
 │                                    has no prompt template, it's a direct provider call)
+│   └── editor/                     Eleventh and final agent — assembles a branch's
+│                                    rendered shots + voice/music tracks into one
+│                                    final cut via local ffmpeg, no LLM involved
+│       ├── agent.py                 EditorAgent: like Video Generation, never calls
+│       │                            an LLM (no prompts/ dir, prompt_version always
+│       │                            "n/a") - calls EditorComposeProvider (ffmpeg,
+│       │                            the only real implementation) directly. Unlike
+│       │                            every fan-out agent, there's no per-item retry -
+│       │                            a single ffmpeg invocation either assembles the
+│       │                            whole cut or it doesn't, so the whole call
+│       │                            retries as one unit on a transient failure
+│       └── schema.py                EditorRequest (EditorShotInput[] ordered by
+│                                    shot_number + EditorAudioInput[] - each a Voice
+│                                    line or Music cue with a precomputed absolute
+│                                    start_offset_seconds in the final timeline) +
+│                                    EditorResult (output_path/duration_seconds/
+│                                    provider/shot_count/audio_track_count)
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
@@ -795,14 +862,24 @@ app/
     │                                Project), prints the extracted dialogue lines and
     │                                their synthesis outcome for the first generated
     │                                branch
-    └── music.py                     python -m app.demo.music — runs the full pipeline
-                                     built so far (Story -> Character -> Decision ->
-                                     Timeline -> Character Memory -> Storyboard ->
+    ├── music.py                     python -m app.demo.music — runs the full pipeline
+    │                                built so far (Story -> Character -> Decision ->
+    │                                Timeline -> Character Memory -> Storyboard ->
+    │                                Prompt Director -> Video Generation -> Voice ->
+    │                                Music) against a real DB session (creates its own
+    │                                demo Project), prints the extracted music cues and
+    │                                their synthesis outcome for the first generated
+    │                                branch
+    └── editor.py                    python -m app.demo.editor — runs the complete
+                                     11-agent pipeline (Story -> Character -> Decision
+                                     -> Timeline -> Character Memory -> Storyboard ->
                                      Prompt Director -> Video Generation -> Voice ->
-                                     Music) against a real DB session (creates its own
-                                     demo Project), prints the extracted music cues and
-                                     their synthesis outcome for the first generated
-                                     branch
+                                     Music -> Editor) against a real DB session, a
+                                     local ffmpeg binary, and the live DashScope API
+                                     (creates its own demo Project), prints the
+                                     assembled final cut's Asset (oss_key, duration,
+                                     size) and how many shots/voice tracks/music
+                                     tracks made it into the cut
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -824,11 +901,22 @@ tests/
 │                                    TimelineGenerationResult/CharacterMemoryResult/
 │                                    StoryboardResult/PromptDirectorResult/
 │                                    VideoGenerationAgentResult/VoiceAgentResult/
-│                                    MusicAgentResult/AgentRunResult builders, reused
-│                                    across agents/services/routers/graph tests
+│                                    MusicAgentResult/EditorResult/AgentRunResult
+│                                    builders, reused across agents/services/routers/
+│                                    graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
+│                                    - except Editor, which never calls DashScope at all
+│                                    (see tests/integrations/ instead)
+├── integrations/                    test_ffmpeg_editor_provider.py: real-ffmpeg
+│                                    integration test for the only EditorComposeProvider
+│                                    implementation - generates tiny synthetic test
+│                                    videos/audio via ffmpeg's own lavfi source filters,
+│                                    then composes them for real. Costs no API credits
+│                                    (everything runs locally), so unlike *_live.py it's
+│                                    not gated behind RUN_LIVE_API_TESTS - it's gated on
+│                                    ffmpeg/ffprobe actually being on PATH instead
 ├── graphs/                          LangGraph node wiring test (story_architect ->
 │                                    character_architect -> decision_detector, all 3 mocked;
 │                                    timeline_generator is intentionally not part of this graph)
@@ -843,7 +931,9 @@ tests/
 Run the suite:
 
 ```bash
-docker compose exec api pytest                                   # full suite
+docker compose exec api pytest                                   # full suite (includes
+                                                                   # the real-ffmpeg
+                                                                   # integration test)
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
 RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py tests/agents/test_prompt_director_live.py tests/agents/test_video_generation_live.py tests/agents/test_voice_live.py tests/agents/test_music_live.py
 ```
@@ -889,7 +979,8 @@ All routes are mounted under `/v1`.
 | POST | `/v1/assets/render-shots` | Run the Video Generation Agent on a `storyboard_version_id`; persists and returns one `Asset` per rendered shot, plus any failed shots |
 | POST | `/v1/assets/synthesize-voice` | Run the Voice Agent on a `storyboard_version_id`; extracts dialogue lines, synthesizes each one, and persists and returns one `Asset` per rendered line, plus any failed lines |
 | POST | `/v1/assets/generate-music` | Run the Music Agent on a `storyboard_version_id`; scores the branch with one or more cues and, if `MUSIC_PROVIDER` is configured, synthesizes each one - persists and returns one `Asset` per synthesized cue (`null` if no provider is configured), plus any failed cues |
-| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director, Voice, and Music created; `GET /v1/assets?project_id=` and `GET /v1/assets/{asset_id}` are how you read back what Video Generation, Voice, and Music created - no new read endpoints needed for any of them |
+| POST | `/v1/assets/assemble-movie` | Run the Editor Agent on a `storyboard_version_id`; assembles every successfully rendered shot plus any voice/music tracks into one final cut via ffmpeg, persists it as an `Asset`, and sets `movies.final_asset_id`/`movies.status='completed'` |
+| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director, Voice, and Music created; `GET /v1/assets?project_id=` and `GET /v1/assets/{asset_id}` are how you read back what Video Generation, Voice, Music, and Editor created; `GET /v1/movies/by-branch/{branch_id}` is how you read back the final movie's status/final_asset_id - no new read endpoints needed for any of them |
 
 ### Example: generate a story, then its cast, its forks, and its branches
 
@@ -948,6 +1039,11 @@ curl -X POST http://localhost:8000/v1/assets/generate-music \
   -H "Content-Type: application/json" \
   -d '{"storyboard_version_id": "<version_id>"}'
 # -> {"branch_id": "<branch_id>", "storyboard_version_id": "<version_id>", "cues": [{"start_shot_number": 1, "end_shot_number": 2, "mood": "...", "tempo_bpm": 110, "generation_prompt": "...", "asset": null}, ...], "failed_cues": [], ...}
+
+curl -X POST http://localhost:8000/v1/assets/assemble-movie \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id>"}'
+# -> {"branch_id": "<branch_id>", "movie_id": "<movie_id>", "job_id": "<job_id>", "storyboard_version_id": "<version_id>", "asset": {"oss_key": "/app/media/editor/...mp4", ...}, "shot_count": 5, "voice_track_count": 2, "music_track_count": 1, "skipped_shot_numbers": [], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -984,12 +1080,16 @@ plus `cues` (one rendered cue per extracted `MusicCue`, each carrying its
 `start_shot_number`/`end_shot_number`, `mood`, `tempo_bpm`, `generation_prompt`, and
 `asset` - `null` when no `MusicGenerationProvider` is configured) and `failed_cues`
 (only populated when a provider is configured and a cue's synthesis exhausted its
-retries). All ten share the same generation-provenance shape (`model`,
-`prompt_version`, `latency_ms`, `attempts`, token counts) - Character Memory's is all
-zero/`"n/a"` in the one case where it skips the LLM call entirely (a story with no
-characters yet), and Video Generation's `prompt_tokens`/`completion_tokens` are simply
-absent from its response schema (not just `None`) since it never calls an LLM at all;
-its `prompt_version` is always the literal `"n/a"`.
+retries). Editor assemble returns an `EditorGenerateResponse`: the resolved
+`branch_id`, `movie_id`, `job_id`, and `storyboard_version_id`, plus the final cut's
+`asset`, `shot_count`/`voice_track_count`/`music_track_count`, and
+`skipped_shot_numbers` (any shot that never rendered and so was left out of the cut).
+All eleven share the same generation-provenance shape (`model`, `prompt_version`,
+`latency_ms`, `attempts`, token counts) - Character Memory's is all zero/`"n/a"` in
+the one case where it skips the LLM call entirely (a story with no characters yet),
+and Video Generation/Editor's `prompt_tokens`/`completion_tokens` are simply absent
+from their response schemas (not just `None`) since neither ever calls an LLM at all;
+their `prompt_version` is always the literal `"n/a"`.
 
 ---
 
@@ -1005,7 +1105,11 @@ See `.env.example` for the full, documented list. The essentials:
   selection (`wan`/`happyhorse`, `dashscope`/`happyhorse`, `happyhorse`/`none`).
 - `MEDIA_ROOT` (default `/app/media`) — local-disk directory the Voice and Music
   Agents write synthesized audio files to, since CosyVoice/HappyHorse return raw
-  bytes with no hosted URL of their own (unlike Wan's video_url).
+  bytes with no hosted URL of their own (unlike Wan's video_url); the Editor Agent
+  writes its assembled final cut here too.
+- `FFMPEG_BINARY` / `FFPROBE_BINARY` (default `ffmpeg`/`ffprobe`) — the Editor Agent
+  shells out to these (installed in the api image's Dockerfile) to assemble the
+  final cut; no Strategy pattern/vendor swap here, unlike video/voice/music.
 - `DECISION_BRANCH_CANDIDATES_MIN` / `_MAX` (default 2/4) — bounds how many branch
   candidates the Decision Detector Agent may produce per decision point, to cap
   multiverse fan-out cost downstream.
@@ -1023,12 +1127,23 @@ See `.env.example` for the full, documented list. The essentials:
 
 ## Known limitations
 
-- Only the **Story Architect**, **Character Architect**, **Decision Detector**,
-  **Timeline Generator**, **Character Memory**, **Storyboard**, **Prompt
-  Director**, **Video Generation**, **Voice**, and **Music** Agents are implemented
-  end-to-end so far. The remaining **Editor** Agent is designed in `ARCHITECTURE.md`
-  but not yet built — it's added on top of this foundation, following the Story
-  Architect's reference pattern in `app/agents/`.
+- All eleven agents `ARCHITECTURE.md` specifies — **Story Architect**, **Character
+  Architect**, **Decision Detector**, **Timeline Generator**, **Character Memory**,
+  **Storyboard**, **Prompt Director**, **Video Generation**, **Voice**, **Music**,
+  and **Editor** — are implemented end-to-end, each with its own live-verified test
+  run against the real DashScope API (or, for Editor, real local ffmpeg). The one
+  thing not currently demonstrated is all eleven chained together in a single live
+  run - see the next bullet.
+- As of this writing, `python -m app.demo.editor` (the full 11-agent chain) fails at
+  the Video Generation step with a persistent `403 Forbidden` from Wan's
+  `video-synthesis` endpoint - an external DashScope account/quota issue, not a code
+  defect (Video Generation itself was live-verified independently, earlier in this
+  build, before this started occurring). Editor's own logic is verified two other
+  ways instead: `tests/integrations/test_ffmpeg_editor_provider.py` runs the real
+  `FfmpegEditorComposeProvider` against real synthetic local media (no DashScope
+  involved), and `tests/routers/test_editor_router.py` exercises the full HTTP/DB
+  chain with upstream agents mocked. Re-run `python -m app.demo.editor` once the Wan
+  account issue clears to get a true end-to-end live cut.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
@@ -1176,3 +1291,45 @@ See `.env.example` for the full, documented list. The essentials:
   Voice/Prompt Director/Video Generation - no automatic orchestration yet. Re-running
   it inserts a fresh batch of `PromptHistory`/`Asset` rows (there's no upsert) rather
   than replacing the previous batch.
+- `EditorAgent` is the second agent (after Video Generation) that never calls an LLM,
+  and the only one that doesn't call a remote provider either - it shells out to a
+  local ffmpeg binary (installed via the api image's Dockerfile), so there's no
+  Strategy pattern/vendor swap for this capability, unlike video/voice/music.
+- `EditorAgent` writes no `prompt_history` rows of its own - there's no `editing`
+  `PromptStage`, since `ARCHITECTURE.md` frames this step as literal assembly
+  ("assembled final movie asset... via server-side ffmpeg composition job"), not
+  prompt-driven generation. It only *reads* the `SHOT_PROMPT`/`VOICE`/`MUSIC` rows
+  the upstream agents already wrote for the exact storyboard version it's given.
+- `EditorService` gracefully skips any shot that never rendered (Wan failure, or a
+  shot prompt that never got rendered at all) rather than failing the whole assembly
+  - the same choice Video Generation/Voice/Music make per item. A voice line or music
+  cue that references a skipped shot is skipped too (there's no sensible position for
+  it in a final cut that's missing that shot), logged as a warning. If literally
+  every shot was skipped, the whole request fails with a `ConflictError` - there's
+  nothing to assemble.
+- Each included shot's absolute position in the final timeline is computed as the
+  cumulative duration of every included shot before it - not stored anywhere by
+  Voice/Music themselves (which only know "this line belongs to shot N", not "shot N
+  starts at second X"). This is a new design decision Editor makes, consistent with
+  ARCHITECTURE.md's Voice Agent description ("time-coded for editor alignment")
+  without that time-coding being explicit elsewhere in the schema.
+- ffmpeg reads shot videos directly from Wan's presigned `video_url` (an http(s)
+  input, no local download step) - if that URL has already expired by the time
+  Editor runs, composition fails. A production build would re-host shots to
+  permanent storage immediately after Video Generation completes (the OSS pipeline
+  this build doesn't have - see Video Generation's limitations above) specifically
+  to avoid this.
+- The audio mix is a single global `amix` of every voice/music track, each delayed
+  into position with `adelay` - there's no per-track volume balancing (a music cue
+  and a dialogue line are mixed at equal gain) or ducking (music doesn't automatically
+  lower under dialogue). A production build would tune relative levels per track kind.
+- `EditorAgent` retries the *entire* composition as one unit (up to 3 attempts) on a
+  transient ffmpeg/provider failure, unlike every fan-out agent (Video Generation/
+  Voice/Music) which retries per-item - there's no meaningful "partial" outcome for a
+  single ffmpeg invocation the way there is for N independent shot/line/cue calls.
+- `EditorAgent` runs once per `storyboard_version_id` you explicitly pass in, same as
+  the other version-scoped agents - no automatic orchestration yet (no real LangGraph
+  join on shots+voice+music completion, per `ARCHITECTURE.md` §11-12). Re-running it
+  inserts a fresh `Asset` row and overwrites `movies.final_asset_id` to point at the
+  newest cut, rather than keeping version history the way Storyboard's `Version` rows
+  do.

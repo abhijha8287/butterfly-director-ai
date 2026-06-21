@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from app.config.settings import Settings, get_settings
 from app.integrations.providers.base import (
+    EditorComposeProvider,
     MusicGenerationProvider,
     VideoGenerationProvider,
     VoiceGenerationProvider,
 )
 from app.integrations.providers.dashscope_tts_provider import DashScopeTTSProvider
+from app.integrations.providers.ffmpeg_editor_provider import FfmpegEditorComposeProvider
 from app.integrations.providers.happyhorse_provider import HappyHorseProvider
 from app.integrations.providers.wan_video_provider import WanVideoProvider
 
@@ -36,3 +38,7 @@ def get_music_provider(settings: Settings | None = None) -> MusicGenerationProvi
     if settings.music_provider == "happyhorse":
         return HappyHorseProvider(settings)
     raise ValueError(f"Unknown music provider: {settings.music_provider}")
+
+
+def get_editor_provider(settings: Settings | None = None) -> EditorComposeProvider:
+    return FfmpegEditorComposeProvider(settings or get_settings())

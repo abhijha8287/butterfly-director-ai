@@ -77,10 +77,18 @@ class Settings(BaseSettings):
     provider_poll_timeout_seconds: float = Field(default=600.0)
 
     # No real OSS upload pipeline exists yet (see ARCHITECTURE.md's storage_service.py,
-    # not built) - the Voice Agent writes synthesized audio bytes to local disk under
-    # this path as a placeholder, since (unlike Wan's video_url) the TTS providers
-    # return raw bytes with nowhere else to go.
+    # not built) - the Voice/Music Agents write synthesized audio bytes to local disk
+    # under this path as a placeholder, since (unlike Wan's video_url) the TTS/music
+    # providers return raw bytes with nowhere else to go. The Editor Agent writes its
+    # assembled final cut here too, for the same reason.
     media_root: str = Field(default="/app/media")
+
+    # The Editor Agent shells out to these binaries (must be on PATH, or set an
+    # absolute path) to concatenate shots and mix in voice/music audio tracks. Unlike
+    # video/voice/music, there's no vendor Strategy pattern here - ARCHITECTURE.md
+    # specifies ffmpeg composition specifically, not a swappable provider.
+    ffmpeg_binary: str = Field(default="ffmpeg")
+    ffprobe_binary: str = Field(default="ffprobe")
 
     # Decision Detector: bounds fan-out cost by capping how many branch
     # candidates a single decision point may produce. Enforced as a semantic

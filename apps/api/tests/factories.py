@@ -10,6 +10,7 @@ from app.agents.character_memory.schema import (
     CharacterStateDiff,
 )
 from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
+from app.agents.editor.schema import EditorAudioInput, EditorRequest, EditorResult, EditorShotInput
 from app.agents.music.schema import (
     MusicAgentResult,
     MusicCue,
@@ -791,6 +792,71 @@ def make_music_agent_run_result(**overrides: object) -> AgentRunResult[MusicAgen
         "attempts": 1,
         "prompt_tokens": 150,
         "completion_tokens": 160,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_EDITOR_SHOT_INPUT_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "video_url": "https://example.com/shot1.mp4",
+    "duration_seconds": 4.5,
+}
+
+
+def make_editor_shot_input(**overrides: object) -> EditorShotInput:
+    kwargs = dict(VALID_EDITOR_SHOT_INPUT_KWARGS)
+    kwargs.update(overrides)
+    return EditorShotInput(**kwargs)
+
+
+VALID_EDITOR_AUDIO_INPUT_KWARGS: dict[str, object] = {
+    "source": "/app/media/voice/line1.mp3",
+    "start_offset_seconds": 0.0,
+    "kind": "voice",
+}
+
+
+def make_editor_audio_input(**overrides: object) -> EditorAudioInput:
+    kwargs = dict(VALID_EDITOR_AUDIO_INPUT_KWARGS)
+    kwargs.update(overrides)
+    return EditorAudioInput(**kwargs)
+
+
+def make_editor_request(**overrides: object) -> EditorRequest:
+    shots = overrides.pop("shots", None)
+    if shots is None:
+        shots = [make_editor_shot_input()]
+    audio_tracks = overrides.pop("audio_tracks", None)
+    if audio_tracks is None:
+        audio_tracks = []
+    defaults: dict[str, object] = {"output_path": "/app/media/editor/output.mp4"}
+    defaults.update(overrides)
+    return EditorRequest(shots=shots, audio_tracks=audio_tracks, **defaults)
+
+
+VALID_EDITOR_RESULT_KWARGS: dict[str, object] = {
+    "output_path": "/app/media/editor/output.mp4",
+    "duration_seconds": 9.5,
+    "provider": "ffmpeg",
+    "shot_count": 1,
+    "audio_track_count": 0,
+}
+
+
+def make_editor_result(**overrides: object) -> EditorResult:
+    kwargs = dict(VALID_EDITOR_RESULT_KWARGS)
+    kwargs.update(overrides)
+    return EditorResult(**kwargs)
+
+
+def make_editor_agent_run_result(**overrides: object) -> AgentRunResult[EditorResult]:
+    defaults: dict[str, object] = {
+        "output": make_editor_result(),
+        "model": "ffmpeg",
+        "prompt_version": "n/a",
+        "latency_ms": 4200,
+        "attempts": 1,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)
