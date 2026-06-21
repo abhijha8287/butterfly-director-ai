@@ -15,6 +15,7 @@ from app.routers.v1 import (
     prompt_history,
     stories,
     story_architect,
+    storyboard,
     timeline_generator,
     timelines,
 )
@@ -32,6 +33,7 @@ api_v1_router.include_router(characters.router)
 api_v1_router.include_router(character_architect.router)
 api_v1_router.include_router(character_memory.router)
 api_v1_router.include_router(decision_detector.router)
+api_v1_router.include_router(storyboard.router)
 api_v1_router.include_router(assets.router)
 api_v1_router.include_router(jobs.router)
 api_v1_router.include_router(agent_logs.router)

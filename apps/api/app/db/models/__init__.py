@@ -10,6 +10,7 @@ from app.db.models.project import Project
 from app.db.models.prompt_history import PromptHistory
 from app.db.models.story import Story
 from app.db.models.timeline import Timeline
+from app.db.models.version import Version
 
 __all__ = [
     "AgentLog",
@@ -24,4 +25,5 @@ __all__ = [
     "PromptHistory",
     "Story",
     "Timeline",
+    "Version",
 ]

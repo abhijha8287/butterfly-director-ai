@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,3 +20,11 @@ class CharacterBranchStateRepository(BaseRepository[CharacterBranchState]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def list_all_by_branch(self, branch_id: UUID) -> Sequence[CharacterBranchState]:
+        stmt = select(CharacterBranchState).where(
+            CharacterBranchState.branch_id == branch_id,
+            CharacterBranchState.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()

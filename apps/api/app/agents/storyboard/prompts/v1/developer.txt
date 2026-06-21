@@ -1,0 +1,18 @@
+Operating instructions:
+
+- Read the StoryBible's visual_style, cinematic_style, setting, and important_locations
+  first - these set the visual language every shot should follow.
+- Read the branch's name, summary, and delta_script - this is the specific content of
+  this universe you are storyboarding, not the story in general.
+- Read each character's current state (knowledge_state, emotional_state,
+  physical_state) - a character's expression, posture, and behavior in a shot should
+  reflect their actual state in this branch, not a generic default.
+- Break the branch's events into a sequence of shots. Each shot should cover one
+  continuous camera setup/moment - a change in framing, angle, or location is a new
+  shot.
+- For each shot, decide: scene (heading), description (what's seen/happening),
+  camera (angle/movement), duration_seconds, and characters_present (which roster
+  characters are visible/active, by name, exactly as given - empty list if the shot
+  is an empty establishing/object shot with no characters in frame).
+- Order shots exactly as they occur in the branch's events, numbered 1..N with no
+  gaps or repeats.

@@ -14,9 +14,9 @@ shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` fo
 approved design decisions.
 
 > Status: Story Architect, Character Architect, Decision Detector, Timeline Generator,
-> and Character Memory Agents are complete and live-verified. Remaining agents
-> (Storyboard, Prompt Director, Video, Voice, Music, Editor) are built incrementally,
-> one at a time, on top of this foundation.
+> Character Memory, and Storyboard Agents are complete and live-verified. Remaining
+> agents (Prompt Director, Video, Voice, Music, Editor) are built incrementally, one
+> at a time, on top of this foundation.
 
 ---
 
@@ -170,6 +170,36 @@ this agent owns its own router prefix since there's no pre-existing generic CRUD
 resource for character/branch consistency records to share with, unlike Timeline
 Generator.
 
+### Try the Storyboard Agent
+
+Also takes only a `branch_id` - it resolves the StoryBible, branch script
+(`decision_summary.delta_script`), and per-character state (from Character Memory,
+if it's run yet) on its own:
+
+```bash
+curl -X POST http://localhost:8000/v1/storyboard/generate \
+  -H "Content-Type: application/json" \
+  -d '{"branch_id": "<branch_id from /v1/timelines/generate-branches above>"}'
+```
+
+This produces an ordered, contiguous shot list (`scene`, `shot_number`, `description`,
+`camera`, `duration_seconds`, `characters_present`) and persists it as a `storyboard`
+`Version` snapshot (per `ARCHITECTURE.md` §4.12's polymorphic version-history table,
+built for this agent since nothing previously needed it) rather than a bespoke table -
+re-running for the same branch adds a new `version_number` instead of overwriting
+history, since re-storyboarding is an explicitly named regeneration case in that
+table's own design. A `Movie` row is lazily get-or-created for the branch and moved to
+`storyboarding` status, with `shot_count` written into its `metadata`. Or run the
+standalone demo, which runs the full pipeline built so far end to end (it creates its
+own demo Project):
+
+```bash
+docker compose exec api python -m app.demo.storyboard
+```
+
+The storyboards this creates are readable via `GET /v1/storyboard?branch_id=`
+(version history, most recent first) or `GET /v1/storyboard/{version_id}`.
+
 ### Stopping / resetting
 
 ```bash
@@ -249,20 +279,27 @@ app/
 │   ├── base.py                    Async SQLAlchemy engine/session factory
 │   ├── models/                    SQLAlchemy ORM models: project, story, character,
 │   │                              character_branch_state, decision_point, timeline,
-│   │                              branch, movie, asset, job, agent_log, prompt_history,
-│   │                              enums, mixins (timestamps/soft-delete). story.project_id
-│   │                              and character.project_id are both nullable (agents
-│   │                              generate them standalone, before any Project exists);
-│   │                              character.story_id and decision_point.story_id link
-│   │                              generated rows back to the Story they were built from.
-│   │                              character_branch_state has first-class drift_severity
-│   │                              (enum) + drift_warning columns (queryable) alongside a
-│   │                              state_diff JSONB blob for the descriptive fields, and a
-│   │                              unique(character_id, branch_id) constraint.
+│   │                              branch, movie, version, asset, job, agent_log,
+│   │                              prompt_history, enums, mixins (timestamps/soft-delete).
+│   │                              story.project_id and character.project_id are both
+│   │                              nullable (agents generate them standalone, before any
+│   │                              Project exists); character.story_id and
+│   │                              decision_point.story_id link generated rows back to
+│   │                              the Story they were built from. character_branch_state
+│   │                              has first-class drift_severity (enum) + drift_warning
+│   │                              columns (queryable) alongside a state_diff JSONB blob
+│   │                              for the descriptive fields, and a unique(character_id,
+│   │                              branch_id) constraint. version is the polymorphic
+│   │                              regeneration-history table from ARCHITECTURE.md §4.12
+│   │                              (entity_type/entity_id/version_number/snapshot) - no
+│   │                              FK on entity_id (it points at whichever table
+│   │                              entity_type names) or created_by (no `users` table
+│   │                              exists in this build; mirrors Project.owner_id).
 │   └── migrations/                Alembic migrations (initial schema, butterfly-score
 │                                   fields, nullable story.project_id + generation_metadata,
 │                                   nullable character.project_id + story_id + generation_metadata,
-│                                   new decision_points table, new character_branch_states table)
+│                                   new decision_points table, new character_branch_states
+│                                   table, new versions table)
 │
 ├── repositories/                  One repository per model — thin async CRUD wrappers
 │                                  over SQLAlchemy (BaseRepository[Model] generic base)
@@ -288,6 +325,12 @@ app/
 │                                  update the existing CharacterBranchState rows instead of
 │                                  duplicating them (the table's unique(character_id, branch_id)
 │                                  constraint would otherwise reject a second insert).
+│                                  storyboard_service.py also takes only a branch_id, gracefully
+│                                  falling back to "not yet resolved" defaults for any character
+│                                  Character Memory hasn't processed for that branch yet; it
+│                                  persists through version_repository.py's generic Version table
+│                                  rather than a bespoke one, and lazily get-or-creates the branch's
+│                                  Movie row, moving it to `storyboarding` status.
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -376,20 +419,45 @@ app/
 │       │                            retries the agent. Thin state_diff content / a stray
 │       │                            drift_warning on drift_severity="none" warn only.
 │       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│   └── storyboard/                 Sixth agent — breaks one branch into an ordered,
+│       │                            filmable shot list
+│       ├── agent.py                 StoryboardAgent: identical shape to the other five
+│       │                            agents (ChatOpenAI + PydanticOutputParser +
+│       │                            self-driven repair loop), temperature=0.7 - a
+│       │                            creative-but-grounded middle ground between
+│       │                            Character Memory's 0.4 and Timeline Generator's 0.8
+│       ├── schema.py                StoryboardRequest (StoryBible + branch
+│       │                            name/summary/delta_script + CharacterStateSummary[]
+│       │                            in) + Shot (scene, shot_number, description, camera,
+│       │                            duration_seconds, characters_present) +
+│       │                            StoryboardResult
+│       ├── validators.py            Hard checks: at least one shot (unlike Decision
+│       │                            Detector, zero is never valid here), and
+│       │                            shot_number values must be unique and contiguous
+│       │                            from 1 - this ordering is load-bearing for Prompt
+│       │                            Director/Video Generation's per-shot fan-out.
+│       │                            characters_present naming an unknown roster member,
+│       │                            or a single shot's duration_seconds being
+│       │                            unrealistically long, warn only.
+│       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
 │                                   character_architect -> decision_detector -> END. Each
 │                                   downstream node reads the story node's StoryBible
-│                                   directly out of graph state. Timeline Generator and
-│                                   Character Memory are deliberately NOT in this graph -
-│                                   both persist real DB side effects (a Project/Timeline/
-│                                   Branch graph, and CharacterBranchState rows keyed off a
-│                                   branch_id), which doesn't fit this graph's
-│                                   pure-in-memory-agent-chaining design; both are invoked
-│                                   via their own service instead. Future LLM-only agents
-│                                   extend this graph; DB-writing agents follow that
-│                                   service-only pattern.
+│                                   directly out of graph state. Timeline Generator,
+│                                   Character Memory, and Storyboard are deliberately NOT
+│                                   in this graph - all three persist real DB side
+│                                   effects (a Project/Timeline/Branch graph,
+│                                   CharacterBranchState rows, and storyboard Version
+│                                   rows, respectively, all keyed off a branch_id), which
+│                                   doesn't fit this graph's pure-in-memory-agent-chaining
+│                                   design; all three are invoked via their own service
+│                                   instead. Future LLM-only agents extend this graph;
+│                                   DB-writing agents follow that service-only pattern -
+│                                   these three are also the first three nodes of the
+│                                   not-yet-built movie_production_graph per
+│                                   ARCHITECTURE.md §5.1.
 │
 ├── integrations/
 │   ├── qwen_client.py               Low-level DashScope/Qwen HTTP client
@@ -429,12 +497,18 @@ app/
     │                                Timeline) against a real DB session (creates its
     │                                own demo Project), prints the created branches
     │                                with their computed butterfly scores
-    └── character_memory.py          python -m app.demo.character_memory — runs the
-                                     full pipeline built so far (Story -> Character ->
-                                     Decision -> Timeline -> Character Memory) against a
-                                     real DB session (creates its own demo Project),
-                                     prints each character's resolved state_diff +
-                                     drift judgment for the first generated branch
+    ├── character_memory.py          python -m app.demo.character_memory — runs the
+    │                                full pipeline built so far (Story -> Character ->
+    │                                Decision -> Timeline -> Character Memory) against a
+    │                                real DB session (creates its own demo Project),
+    │                                prints each character's resolved state_diff +
+    │                                drift judgment for the first generated branch
+    └── storyboard.py                python -m app.demo.storyboard — runs the full
+                                     pipeline built so far (Story -> Character ->
+                                     Decision -> Timeline -> Character Memory ->
+                                     Storyboard) against a real DB session (creates its
+                                     own demo Project), prints the ordered shot list for
+                                     the first generated branch
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -454,8 +528,8 @@ tests/
 │                                      test its own loop)
 ├── factories.py                    Shared fake StoryBible/CharacterRoster/DecisionList/
 │                                    TimelineGenerationResult/CharacterMemoryResult/
-│                                    AgentRunResult builders, reused across
-│                                    agents/services/routers/graph tests
+│                                    StoryboardResult/AgentRunResult builders, reused
+│                                    across agents/services/routers/graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
@@ -475,7 +549,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -511,6 +585,10 @@ All routes are mounted under `/v1`.
 | GET | `/v1/character-memory/{id}` | Fetch one persisted character/branch state by id |
 | GET | `/v1/character-memory?branch_id=&character_id=` | Cursor-paginated list of persisted states, optionally filtered by branch and/or character |
 | DELETE | `/v1/character-memory/{id}` | Soft-delete a persisted character/branch state |
+| POST | `/v1/storyboard/generate` | Run the Storyboard Agent on a `branch_id`; persists a new `storyboard` Version and returns its ordered shot list |
+| GET | `/v1/storyboard/{version_id}` | Fetch one persisted storyboard version by id |
+| GET | `/v1/storyboard?branch_id=` | Cursor-paginated version history for a branch's storyboard, most recent first |
+| DELETE | `/v1/storyboard/{version_id}` | Soft-delete a persisted storyboard version |
 | `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created, no new read endpoints needed |
 
 ### Example: generate a story, then its cast, its forks, and its branches
@@ -545,6 +623,11 @@ curl -X POST http://localhost:8000/v1/character-memory/generate \
   -H "Content-Type: application/json" \
   -d '{"branch_id": "<branch_id>"}'
 # -> {"branch_id": "<branch_id>", "states": [{"character_name": "...", "drift_severity": "none", ...}, ...], ...}
+
+curl -X POST http://localhost:8000/v1/storyboard/generate \
+  -H "Content-Type: application/json" \
+  -d '{"branch_id": "<branch_id>"}'
+# -> {"branch_id": "<branch_id>", "version_number": 1, "shots": [{"shot_number": 1, "scene": "...", ...}, ...], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -560,7 +643,10 @@ returns a `TimelineGenerateBranchesResponse`: the resolved `timeline_id` plus on
 populated with real values instead of structural-baseline ones. Character Memory
 generate returns a `CharacterMemoryGenerateResponse`: the resolved `story_id` plus one
 `CharacterStateRead` per character in that story (`state_diff`, `drift_severity`,
-`drift_warning`). All five share the same generation-provenance shape (`model`,
+`drift_warning`). Storyboard generate returns a `StoryboardGenerateResponse`: the
+resolved `movie_id` and `version_id`/`version_number` plus the ordered `shots` list
+(`scene`, `shot_number`, `description`, `camera`, `duration_seconds`,
+`characters_present`). All six share the same generation-provenance shape (`model`,
 `prompt_version`, `latency_ms`, `attempts`, token counts) - Character Memory's is all
 zero/`"n/a"` in the one case where it skips the LLM call entirely (a story with no
 characters yet).
@@ -589,10 +675,11 @@ See `.env.example` for the full, documented list. The essentials:
 ## Known limitations
 
 - Only the **Story Architect**, **Character Architect**, **Decision Detector**,
-  **Timeline Generator**, and **Character Memory** Agents are implemented end-to-end
-  so far. Downstream agents (Storyboard, Prompt Director, Video, Voice, Music, Editor)
-  are designed in `ARCHITECTURE.md` but not yet built — they're added one at a time,
-  each following the Story Architect's reference pattern in `app/agents/`.
+  **Timeline Generator**, **Character Memory**, and **Storyboard** Agents are
+  implemented end-to-end so far. Downstream agents (Prompt Director, Video, Voice,
+  Music, Editor) are designed in `ARCHITECTURE.md` but not yet built — they're added
+  one at a time, each following the Story Architect's reference pattern in
+  `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
@@ -639,6 +726,16 @@ See `.env.example` for the full, documented list. The essentials:
   every newly created branch. Re-running it for the same branch updates the existing
   `CharacterBranchState` rows in place rather than creating duplicates or erroring on
   the table's unique constraint.
+- `StoryboardAgent` works correctly with no `CharacterMemoryAgent` run yet for a given
+  branch - characters Character Memory hasn't resolved fall back to "Not yet resolved
+  for this branch." text rather than blocking storyboarding on a prior agent run, since
+  ARCHITECTURE.md doesn't make that ordering a hard dependency.
+- `StoryboardAgent` runs once per `branch_id` you explicitly pass in, same as the other
+  branch-scoped agents - no automatic per-branch orchestration yet. Re-running it adds
+  a new `storyboard` `Version` (`version_number` increments) rather than overwriting
+  the previous one, since the `versions` table is explicitly designed for regeneration
+  history; this is the one branch-scoped agent so far where reruns are additive rather
+  than in-place updates.
 - The Celery `worker` binds to every queue in a single process for this build
   (per the approved design doc); splitting into dedicated per-queue worker pools is a
   `docker-compose.yml` change, not a code change.

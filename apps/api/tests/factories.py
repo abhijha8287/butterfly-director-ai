@@ -9,6 +9,12 @@ from app.agents.character_memory.schema import (
 )
 from app.agents.decision_detector.schema import BranchCandidate, DecisionList, DecisionPoint
 from app.agents.story_architect.schema import StoryBible
+from app.agents.storyboard.schema import (
+    CharacterStateSummary,
+    Shot,
+    StoryboardRequest,
+    StoryboardResult,
+)
 from app.agents.timeline_generator.schema import BranchDraft, TimelineGenerationResult
 
 VALID_STORY_BIBLE_KWARGS: dict[str, object] = {
@@ -293,6 +299,73 @@ def make_character_memory_agent_run_result(
         "attempts": 1,
         "prompt_tokens": 90,
         "completion_tokens": 100,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_CHARACTER_STATE_SUMMARY_KWARGS: dict[str, object] = {
+    "name": "Hero",
+    "role": "protagonist",
+    "physical_description": "Tall, sharp-eyed.",
+    "knowledge_state": "Knows help is coming.",
+    "emotional_state": "Relieved but shaken.",
+    "physical_state": "Minor bruising from the struggle.",
+}
+
+
+def make_character_state_summary(**overrides: object) -> CharacterStateSummary:
+    kwargs = dict(VALID_CHARACTER_STATE_SUMMARY_KWARGS)
+    kwargs.update(overrides)
+    return CharacterStateSummary(**kwargs)
+
+
+VALID_SHOT_KWARGS: dict[str, object] = {
+    "scene": "INT. ALLEY - NIGHT",
+    "shot_number": 1,
+    "description": "She screams. Footsteps approach.",
+    "camera": "low-angle tracking shot",
+    "duration_seconds": 4.5,
+    "characters_present": ["Hero"],
+}
+
+
+def make_shot(**overrides: object) -> Shot:
+    kwargs = dict(VALID_SHOT_KWARGS)
+    kwargs.update(overrides)
+    return Shot(**kwargs)
+
+
+def make_storyboard_request(**overrides: object) -> StoryboardRequest:
+    story_bible = overrides.pop("story_bible", None) or make_story_bible()
+    characters = overrides.pop("characters", None)
+    if characters is None:
+        characters = [make_character_state_summary()]
+    defaults: dict[str, object] = {
+        "branch_name": "Universe: Rescue",
+        "branch_summary": "She shouts and is rescued.",
+        "delta_script": "INT. ALLEY - NIGHT\nShe screams. Footsteps approach.",
+    }
+    defaults.update(overrides)
+    return StoryboardRequest(story_bible=story_bible, characters=characters, **defaults)
+
+
+def make_storyboard_result(**overrides: object) -> StoryboardResult:
+    shots = overrides.pop("shots", None)
+    if shots is None:
+        shots = [make_shot(shot_number=1), make_shot(shot_number=2, scene="EXT. ROOFTOP - NIGHT")]
+    return StoryboardResult(shots=shots, **overrides)
+
+
+def make_storyboard_agent_run_result(**overrides: object) -> AgentRunResult[StoryboardResult]:
+    defaults: dict[str, object] = {
+        "output": make_storyboard_result(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 1414,
+        "attempts": 1,
+        "prompt_tokens": 110,
+        "completion_tokens": 120,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)

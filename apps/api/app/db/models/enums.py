@@ -113,3 +113,11 @@ class DriftSeverity(str, enum.Enum):
     NONE = "none"
     MINOR = "minor"
     MAJOR = "major"
+
+
+class VersionEntityType(str, enum.Enum):
+    TIMELINE = "timeline"
+    BRANCH = "branch"
+    MOVIE = "movie"
+    CHARACTER = "character"
+    STORYBOARD = "storyboard"
