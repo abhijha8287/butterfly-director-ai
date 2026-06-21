@@ -32,6 +32,16 @@ from app.agents.video_generation.schema import (
     VideoGenerationAgentRequest,
     VideoGenerationAgentResult,
 )
+from app.agents.voice.schema import (
+    DialogueLine,
+    DialogueScript,
+    ShotScript,
+    VoiceAgentResult,
+    VoiceCharacterProfile,
+    VoiceLineFailure,
+    VoiceLineResult,
+    VoiceRequest,
+)
 
 VALID_STORY_BIBLE_KWARGS: dict[str, object] = {
     "title": "T",
@@ -542,6 +552,129 @@ def make_video_generation_agent_run_result(
         "prompt_version": "n/a",
         "latency_ms": 1616,
         "attempts": 1,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_VOICE_CHARACTER_PROFILE_KWARGS: dict[str, object] = {
+    "name": "Hero",
+    "personality_traits": ["determined"],
+    "dialogue_style": "Short, clipped sentences.",
+    "voice_descriptor": "low warm voice",
+    "emotional_state": "Relieved but shaken.",
+}
+
+
+def make_voice_character_profile(**overrides: object) -> VoiceCharacterProfile:
+    kwargs = dict(VALID_VOICE_CHARACTER_PROFILE_KWARGS)
+    kwargs.update(overrides)
+    return VoiceCharacterProfile(**kwargs)
+
+
+VALID_SHOT_SCRIPT_KWARGS: dict[str, object] = {
+    "scene": "INT. ALLEY - NIGHT",
+    "shot_number": 1,
+    "description": "She screams. Footsteps approach.",
+    "characters_present": ["Hero"],
+}
+
+
+def make_shot_script(**overrides: object) -> ShotScript:
+    kwargs = dict(VALID_SHOT_SCRIPT_KWARGS)
+    kwargs.update(overrides)
+    return ShotScript(**kwargs)
+
+
+def make_voice_request(**overrides: object) -> VoiceRequest:
+    story_bible = overrides.pop("story_bible", None) or make_story_bible()
+    shots = overrides.pop("shots", None)
+    if shots is None:
+        shots = [make_shot_script()]
+    characters = overrides.pop("characters", None)
+    if characters is None:
+        characters = [make_voice_character_profile()]
+    defaults: dict[str, object] = {"branch_name": "Universe: Rescue"}
+    defaults.update(overrides)
+    return VoiceRequest(story_bible=story_bible, shots=shots, characters=characters, **defaults)
+
+
+VALID_DIALOGUE_LINE_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "character_name": "Hero",
+    "line_text": "Stay back. I know this place better than you think.",
+    "delivery_note": "low, urgent whisper",
+}
+
+
+def make_dialogue_line(**overrides: object) -> DialogueLine:
+    kwargs = dict(VALID_DIALOGUE_LINE_KWARGS)
+    kwargs.update(overrides)
+    return DialogueLine(**kwargs)
+
+
+def make_dialogue_script(**overrides: object) -> DialogueScript:
+    lines = overrides.pop("lines", None)
+    if lines is None:
+        lines = [make_dialogue_line()]
+    return DialogueScript(lines=lines, **overrides)
+
+
+VALID_VOICE_LINE_RESULT_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "character_name": "Hero",
+    "line_text": "Stay back. I know this place better than you think.",
+    "delivery_note": "low, urgent whisper",
+    "audio_format": "mp3",
+    "provider": "dashscope",
+    "attempts": 1,
+}
+
+
+def make_voice_line_result(**overrides: object) -> VoiceLineResult:
+    kwargs = dict(VALID_VOICE_LINE_RESULT_KWARGS)
+    audio_bytes = overrides.pop("audio_bytes", None)
+    if audio_bytes is None:
+        audio_bytes = uuid4().bytes
+    kwargs.update(overrides)
+    return VoiceLineResult(audio_bytes=audio_bytes, **kwargs)
+
+
+VALID_VOICE_LINE_FAILURE_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "character_name": "Hero",
+    "line_text": "Stay back. I know this place better than you think.",
+    "delivery_note": "low, urgent whisper",
+    "attempts": 3,
+    "error": "CosyVoice task abc123 timed out",
+}
+
+
+def make_voice_line_failure(**overrides: object) -> VoiceLineFailure:
+    kwargs = dict(VALID_VOICE_LINE_FAILURE_KWARGS)
+    kwargs.update(overrides)
+    return VoiceLineFailure(**kwargs)
+
+
+def make_voice_agent_result(**overrides: object) -> VoiceAgentResult:
+    lines = overrides.pop("lines", None)
+    if lines is None:
+        lines = [make_voice_line_result()]
+    failed_lines = overrides.pop("failed_lines", None)
+    if failed_lines is None:
+        failed_lines = []
+    return VoiceAgentResult(lines=lines, failed_lines=failed_lines, **overrides)
+
+
+def make_voice_agent_run_result(**overrides: object) -> AgentRunResult[VoiceAgentResult]:
+    defaults: dict[str, object] = {
+        "output": make_voice_agent_result(),
+        "model": "qwen-plus",
+        "prompt_version": "v1",
+        "latency_ms": 1717,
+        "attempts": 1,
+        "prompt_tokens": 150,
+        "completion_tokens": 160,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)

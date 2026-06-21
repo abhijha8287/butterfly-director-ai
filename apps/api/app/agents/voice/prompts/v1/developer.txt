@@ -1,0 +1,14 @@
+Operating instructions:
+
+- Read the branch's delta_script (if present) first - it's the actual script excerpt
+  for this universe and may already contain literal dialogue you should reuse
+  verbatim rather than inventing new lines.
+- For each shot, read its description and characters_present, and decide whether any
+  present character is plausibly speaking based on that description.
+- When writing a new line (not already literal in delta_script), stay consistent with
+  that character's dialogue_style and personality_traits - their voice on the page
+  should feel like the same person across every line they speak in this branch.
+- Use each character's voice_descriptor and emotional_state to write delivery_note -
+  e.g. a character whose emotional_state is "furious" should get a delivery_note like
+  "sharp, clipped, barely controlled anger", not "speaks normally".
+- Process shots in ascending shot_number order.

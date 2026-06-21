@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     provider_poll_interval_seconds: float = Field(default=15.0)
     provider_poll_timeout_seconds: float = Field(default=600.0)
 
+    # No real OSS upload pipeline exists yet (see ARCHITECTURE.md's storage_service.py,
+    # not built) - the Voice Agent writes synthesized audio bytes to local disk under
+    # this path as a placeholder, since (unlike Wan's video_url) the TTS providers
+    # return raw bytes with nowhere else to go.
+    media_root: str = Field(default="/app/media")
+
     # Decision Detector: bounds fan-out cost by capping how many branch
     # candidates a single decision point may produce. Enforced as a semantic
     # (config-driven) check in app/agents/decision_detector/validators.py,
