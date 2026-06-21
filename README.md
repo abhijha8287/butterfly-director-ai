@@ -14,8 +14,8 @@ shipped). See `ARCHITECTURE.md` for the full system design and `docs/design/` fo
 approved design decisions.
 
 > Status: Story Architect, Character Architect, Decision Detector, Timeline Generator,
-> Character Memory, Storyboard, and Prompt Director Agents are complete and
-> live-verified. Remaining agents (Video, Voice, Music, Editor) are built
+> Character Memory, Storyboard, Prompt Director, and Video Generation Agents are
+> complete and live-verified. Remaining agents (Voice, Music, Editor) are built
 > incrementally, one at a time, on top of this foundation.
 
 ---
@@ -236,6 +236,41 @@ The prompts this creates are readable via the already-existing
 `GET /v1/prompt-history?branch_id=` or `GET /v1/prompt-history/{id}` endpoints - no
 new read endpoints were needed.
 
+### Try the Video Generation Agent
+
+Also takes a `storyboard_version_id`, exactly like Prompt Director - the branch is
+resolved from that Version row, and every `PromptHistory` row Prompt Director created
+for that exact storyboard version is what gets rendered:
+
+```bash
+curl -X POST http://localhost:8000/v1/assets/render-shots \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id from /v1/storyboard/generate above>"}'
+```
+
+This is the first agent that doesn't call an LLM at all - it calls the configured
+`VideoGenerationProvider` (Wan primary, HappyHorse alternate) directly, once per shot,
+fanned out concurrently (`ARCHITECTURE.md`'s "fan-out per shot"). Each shot gets its own
+independent repair loop: on a provider rejection it backs the prompt off (drops the
+negative prompt, then shortens the prompt) before retrying, up to 3 attempts - a shot
+that exhausts its attempts is reported as a failure alongside whatever other shots
+succeeded, rather than failing the whole batch. Persists one `Asset` row
+(`kind=video`) per successfully rendered shot and writes every shot's outcome back onto
+the `PromptHistory` row it came from (`response_payload`), per `ARCHITECTURE.md`'s
+"writes assets rows + prompts.response_payload". Also creates one `Job` row
+(`job_type=video_render`) per run and moves the branch's `Movie` to `rendering` status.
+Or run the standalone demo, which runs the full pipeline built so far end to end (it
+creates its own demo Project):
+
+```bash
+docker compose exec api python -m app.demo.video_generation
+```
+
+The rendered assets this creates are readable via the already-existing
+`GET /v1/assets?project_id=` or `GET /v1/assets/{asset_id}` endpoints, and each shot's
+outcome is also visible via `GET /v1/prompt-history?branch_id=` (`response_payload`) -
+no new read endpoints were needed.
+
 ### Stopping / resetting
 
 ```bash
@@ -371,6 +406,13 @@ app/
 │                                  the StoryBible/shots/character context, and persists through the
 │                                  pre-existing prompt_history_repository.py - the first agent needing
 │                                  zero new DB models, since the prompts table predates it.
+│                                  video_generation_service.py also takes a storyboard_version_id and
+│                                  renders every PromptHistory row Prompt Director created for that
+│                                  exact version (scoped via a new repository method matching on
+│                                  input_payload's embedded storyboard_version_id, since reruns are
+│                                  additive); persists one Asset row per rendered shot, writes each
+│                                  shot's outcome back onto the PromptHistory row it came from, creates
+│                                  one Job row per run, and moves the branch's Movie to `rendering`.
 │
 ├── routers/v1/                    FastAPI routers, one per resource, mounted under /v1
 │
@@ -497,6 +539,29 @@ app/
 │       │                            A blank negative_prompt, or characters present
 │       │                            with no consistency_tokens, warn only.
 │       └── prompts/v1/               system.txt, developer.txt, output_instructions.txt
+│   └── video_generation/           Eighth agent — renders one provider-ready video per
+│                                    shot via the Wan/HappyHorse provider
+│       ├── agent.py                 VideoGenerationAgent: the first agent that doesn't
+│       │                            call an LLM at all - it calls the configured
+│       │                            VideoGenerationProvider directly, fanning every
+│       │                            requested shot out concurrently (asyncio.gather).
+│       │                            Each shot gets its own independent repair loop: on
+│       │                            a provider rejection it backs the prompt off (drops
+│       │                            the negative prompt, then shortens the prompt)
+│       │                            before retrying, up to 3 attempts
+│       ├── schema.py                ShotRenderRequest (prompt/negative_prompt/duration
+│       │                            in, tagged with the prompt_history_id it came from)
+│       │                            + ShotRenderResult / ShotRenderFailure (one or the
+│       │                            other per shot) + VideoGenerationAgentResult
+│       ├── validators.py            Hard check: every requested shot must end up in
+│       │                            exactly one of rendered/failed, matched by
+│       │                            shot_number - this mapping is load-bearing for
+│       │                            persistence. A per-shot failure itself never fails
+│       │                            the whole batch (other shots may have rendered
+│       │                            fine) - it's a warning only
+│       └── (no prompts/ dir - this agent never builds an LLM prompt, so there's no
+│                                    prompt_version to template; AgentRunResult.
+│                                    prompt_version is always the literal "n/a")
 │
 ├── graphs/
 │   └── story_creation_graph.py     LangGraph StateGraph: START -> story_architect ->
@@ -566,14 +631,21 @@ app/
     │                                Storyboard) against a real DB session (creates its
     │                                own demo Project), prints the ordered shot list for
     │                                the first generated branch
-    └── prompt_director.py           python -m app.demo.prompt_director — runs the
+    ├── prompt_director.py           python -m app.demo.prompt_director — runs the
+    │                                full pipeline built so far (Story -> Character ->
+    │                                Decision -> Timeline -> Character Memory ->
+    │                                Storyboard -> Prompt Director) against a real DB
+    │                                session (creates its own demo Project), prints the
+    │                                resulting shot prompts (positive/negative prompts,
+    │                                consistency/style tokens) for the first generated
+    │                                branch
+    └── video_generation.py          python -m app.demo.video_generation — runs the
                                      full pipeline built so far (Story -> Character ->
                                      Decision -> Timeline -> Character Memory ->
-                                     Storyboard -> Prompt Director) against a real DB
-                                     session (creates its own demo Project), prints the
-                                     resulting shot prompts (positive/negative prompts,
-                                     consistency/style tokens) for the first generated
-                                     branch
+                                     Storyboard -> Prompt Director -> Video Generation)
+                                     against a real DB session (creates its own demo
+                                     Project), prints the rendered (or failed) outcome
+                                     for each shot of the first generated branch
 ```
 
 ### `tests/` — test suite (pytest, async, 100% coverage on shipped agent modules)
@@ -593,9 +665,9 @@ tests/
 │                                      test its own loop)
 ├── factories.py                    Shared fake StoryBible/CharacterRoster/DecisionList/
 │                                    TimelineGenerationResult/CharacterMemoryResult/
-│                                    StoryboardResult/PromptDirectorResult/AgentRunResult
-│                                    builders, reused across agents/services/routers/graph
-│                                    tests
+│                                    StoryboardResult/PromptDirectorResult/
+│                                    VideoGenerationAgentResult/AgentRunResult builders,
+│                                    reused across agents/services/routers/graph tests
 ├── agents/                          Unit tests per agent: schema validation, semantic
 │                                    validators, agent retry/repair logic (mocked LLM), +
 │                                    one live test per agent gated behind RUN_LIVE_API_TESTS=1
@@ -615,7 +687,7 @@ Run the suite:
 ```bash
 docker compose exec api pytest                                   # full suite
 docker compose exec api pytest --cov=app --cov-report=term-missing  # with coverage
-RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py tests/agents/test_prompt_director_live.py
+RUN_LIVE_API_TESTS=1 docker compose exec -e RUN_LIVE_API_TESTS=1 api pytest tests/agents/test_story_architect_live.py tests/agents/test_character_architect_live.py tests/agents/test_decision_detector_live.py tests/agents/test_timeline_generator_live.py tests/agents/test_character_memory_live.py tests/agents/test_storyboard_live.py tests/agents/test_prompt_director_live.py tests/agents/test_video_generation_live.py
 ```
 
 `pytest` isn't installed in the running `api`/`worker`/`beat` images by default (only
@@ -656,7 +728,8 @@ All routes are mounted under `/v1`.
 | GET | `/v1/storyboard?branch_id=` | Cursor-paginated version history for a branch's storyboard, most recent first |
 | DELETE | `/v1/storyboard/{version_id}` | Soft-delete a persisted storyboard version |
 | POST | `/v1/prompt-history/generate` | Run the Prompt Director Agent on a `storyboard_version_id`; persists and returns one `PromptHistoryRead` per shot |
-| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director created - no new read endpoints needed for either |
+| POST | `/v1/assets/render-shots` | Run the Video Generation Agent on a `storyboard_version_id`; persists and returns one `Asset` per rendered shot, plus any failed shots |
+| `/v1/projects`, `/v1/stories`, `/v1/timelines`, `/v1/branches`, `/v1/movies`, `/v1/characters`, `/v1/assets`, `/v1/jobs`, `/v1/agent-logs`, `/v1/prompt-history` | Generic CRUD endpoints for the underlying domain model (project-scoped resources used by the broader pipeline as more agents come online) - `GET /v1/branches?timeline_id=` and `GET /v1/timelines/{id}/tree` are how you read back what Timeline Generator created; `GET /v1/prompt-history?branch_id=` and `GET /v1/prompt-history/{id}` are how you read back what Prompt Director created; `GET /v1/assets?project_id=` and `GET /v1/assets/{asset_id}` are how you read back what Video Generation created - no new read endpoints needed for any of them |
 
 ### Example: generate a story, then its cast, its forks, and its branches
 
@@ -700,6 +773,11 @@ curl -X POST http://localhost:8000/v1/prompt-history/generate \
   -H "Content-Type: application/json" \
   -d '{"storyboard_version_id": "<version_id>"}'
 # -> {"branch_id": "<branch_id>", "storyboard_version_id": "<version_id>", "shot_prompts": [{"rendered_prompt": "...", ...}, ...], ...}
+
+curl -X POST http://localhost:8000/v1/assets/render-shots \
+  -H "Content-Type: application/json" \
+  -d '{"storyboard_version_id": "<version_id>"}'
+# -> {"branch_id": "<branch_id>", "movie_id": "<movie_id>", "job_id": "<job_id>", "rendered": [{"shot_number": 1, "asset": {"oss_key": "https://...mp4", ...}}, ...], "failed_shots": [], ...}
 ```
 
 Story generate returns a `StoryGenerateResponse`: the full 21-field `StoryBible`, plus
@@ -722,10 +800,16 @@ resolved `movie_id` and `version_id`/`version_number` plus the ordered `shots` l
 `PromptDirectorGenerateResponse`: the resolved `branch_id` and `storyboard_version_id`
 plus one `PromptHistoryRead` per shot (sorted by shot number), each carrying the
 provider-ready `rendered_prompt` and an `input_payload` with the shot reference,
-negative prompt, and consistency/style tokens. All seven share the same
-generation-provenance shape (`model`, `prompt_version`, `latency_ms`, `attempts`, token
-counts) - Character Memory's is all zero/`"n/a"` in the one case where it skips the LLM
-call entirely (a story with no characters yet).
+negative prompt, and consistency/style tokens. Video Generation generate returns a
+`VideoGenerationGenerateResponse`: the resolved `branch_id`, `movie_id`, `job_id`, and
+`storyboard_version_id`, plus `rendered` (one `AssetRead` per successfully rendered
+shot) and `failed_shots` (shot_number/attempts/error for any shot that exhausted its
+retries). All eight share the same generation-provenance shape (`model`,
+`prompt_version`, `latency_ms`, `attempts`, token counts) - Character Memory's is all
+zero/`"n/a"` in the one case where it skips the LLM call entirely (a story with no
+characters yet), and Video Generation's `prompt_tokens`/`completion_tokens` are simply
+absent from its response schema (not just `None`) since it never calls an LLM at all;
+its `prompt_version` is always the literal `"n/a"`.
 
 ---
 
@@ -742,6 +826,12 @@ See `.env.example` for the full, documented list. The essentials:
 - `DECISION_BRANCH_CANDIDATES_MIN` / `_MAX` (default 2/4) — bounds how many branch
   candidates the Decision Detector Agent may produce per decision point, to cap
   multiverse fan-out cost downstream.
+- `PROVIDER_POLL_INTERVAL_SECONDS` / `PROVIDER_POLL_TIMEOUT_SECONDS` (default 15s/600s)
+  — how often and how long the Video Generation Agent polls Wan's async
+  task-create-then-poll API per shot before giving up.
+- `WAN_VIDEO_SIZE` / `WAN_VIDEO_DURATION_SECONDS` (default `1280*720`/5s) — fallback
+  video dimensions/duration the Video Generation Agent passes to Wan when a shot's own
+  `duration_seconds` isn't set.
 - `AUTH_ENABLED` — auth middleware exists but is off by default for this build.
 - Database/Redis/Celery URLs — only matter if running the API outside docker-compose;
   compose overrides them to point at the in-network `postgres`/`redis` services.
@@ -751,11 +841,11 @@ See `.env.example` for the full, documented list. The essentials:
 ## Known limitations
 
 - Only the **Story Architect**, **Character Architect**, **Decision Detector**,
-  **Timeline Generator**, **Character Memory**, **Storyboard**, and **Prompt
-  Director** Agents are implemented end-to-end so far. Downstream agents (Video,
-  Voice, Music, Editor) are designed in `ARCHITECTURE.md` but not yet built —
-  they're added one at a time, each following the Story Architect's reference
-  pattern in `app/agents/`.
+  **Timeline Generator**, **Character Memory**, **Storyboard**, **Prompt
+  Director**, and **Video Generation** Agents are implemented end-to-end so far.
+  Downstream agents (Voice, Music, Editor) are designed in `ARCHITECTURE.md` but not
+  yet built — they're added one at a time, each following the Story Architect's
+  reference pattern in `app/agents/`.
 - `GET /v1/story`, `GET /v1/story/{id}`, `GET /v1/character`, and `GET /v1/character/{id}`
   all assume every row was created by their respective agent (so `world_bible` /
   `canonical_traits`+`voice_profile` deserialize into the expected typed shape). A story
@@ -825,6 +915,27 @@ See `.env.example` for the full, documented list. The essentials:
   doesn't match a character in the story's roster (rather than erroring), the same
   graceful-degradation choice `StoryboardAgent` makes for unresolved Character Memory
   state.
+- `VideoGenerationAgent` implements ARCHITECTURE.md §9.3's "fan-out per shot" as
+  in-process `asyncio.gather` within a single request/demo-script call, not as a real
+  Celery `group()`/`chord` of per-shot tasks - live-verified this still renders shots
+  genuinely concurrently (5 shots, ~50s total latency for the batch, not 5x a single
+  shot's latency), but there's no real per-shot Celery task, retry-via-queue, or
+  cross-process progress tracking yet. The `Job` row this agent creates
+  (`job_type=video_render`) is written/updated synchronously in the same request for
+  the same reason.
+- `VideoGenerationAgent` doesn't call an LLM, so it has no `prompts/` directory and its
+  `AgentRunResult.prompt_version` is always the literal `"n/a"`; its response schema
+  omits `prompt_tokens`/`completion_tokens` entirely rather than leaving them `None`.
+- `VideoGenerationAgent` doesn't upload anything to Alibaba OSS itself - no OSS
+  upload/re-hosting pipeline exists in this build, despite `ARCHITECTURE.md` §10's OSS
+  key structure. `Asset.oss_key` stores Wan's own (time-limited, presigned) `video_url`
+  directly, `oss_bucket` stores the provider name (`wan`/`happyhorse`) as a placeholder,
+  and `size_bytes`/`checksum_sha256` are left as `0`/`None` since the file is never
+  downloaded - a real implementation would fetch the video and re-host it.
+- `VideoGenerationAgent` runs once per `storyboard_version_id` you explicitly pass in,
+  same as Prompt Director - no automatic orchestration yet. Re-running it for the same
+  storyboard version inserts a fresh batch of `Asset` rows (there's no upsert keyed on
+  shot) and a fresh `Job` row each time.
 - The Celery `worker` binds to every queue in a single process for this build
   (per the approved design doc); splitting into dedicated per-queue worker pools is a
   `docker-compose.yml` change, not a code change.

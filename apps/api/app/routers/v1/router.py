@@ -19,6 +19,7 @@ from app.routers.v1 import (
     storyboard,
     timeline_generator,
     timelines,
+    video_generation,
 )
 
 api_v1_router = APIRouter()
@@ -40,3 +41,4 @@ api_v1_router.include_router(jobs.router)
 api_v1_router.include_router(agent_logs.router)
 api_v1_router.include_router(prompt_history.router)
 api_v1_router.include_router(prompt_director.router)
+api_v1_router.include_router(video_generation.router)

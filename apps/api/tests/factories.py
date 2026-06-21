@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from app.agents.base.agent_result import AgentRunResult
 from app.agents.character_architect.schema import CharacterProfile, CharacterRoster, VoiceProfile
 from app.agents.character_memory.schema import (
@@ -23,6 +25,13 @@ from app.agents.storyboard.schema import (
     StoryboardResult,
 )
 from app.agents.timeline_generator.schema import BranchDraft, TimelineGenerationResult
+from app.agents.video_generation.schema import (
+    ShotRenderFailure,
+    ShotRenderRequest,
+    ShotRenderResult,
+    VideoGenerationAgentRequest,
+    VideoGenerationAgentResult,
+)
 
 VALID_STORY_BIBLE_KWARGS: dict[str, object] = {
     "title": "T",
@@ -452,6 +461,87 @@ def make_prompt_director_agent_run_result(
         "attempts": 1,
         "prompt_tokens": 130,
         "completion_tokens": 140,
+    }
+    defaults.update(overrides)
+    return AgentRunResult(**defaults)
+
+
+VALID_SHOT_RENDER_REQUEST_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "prompt": "Tall, sharp-eyed woman in a worn leather jacket screams in a dark alley.",
+    "negative_prompt": "extra limbs, wrong character count, text artifacts",
+    "duration_seconds": 5,
+}
+
+
+def make_shot_render_request(**overrides: object) -> ShotRenderRequest:
+    kwargs = dict(VALID_SHOT_RENDER_REQUEST_KWARGS)
+    prompt_history_id = overrides.pop("prompt_history_id", None) or uuid4()
+    kwargs.update(overrides)
+    return ShotRenderRequest(prompt_history_id=prompt_history_id, **kwargs)
+
+
+def make_video_generation_agent_request(**overrides: object) -> VideoGenerationAgentRequest:
+    shots = overrides.pop("shots", None)
+    if shots is None:
+        shots = [make_shot_render_request()]
+    return VideoGenerationAgentRequest(shots=shots, **overrides)
+
+
+VALID_SHOT_RENDER_RESULT_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "duration_seconds": 5.0,
+    "provider": "wan",
+    "attempts": 1,
+}
+
+
+def make_shot_render_result(**overrides: object) -> ShotRenderResult:
+    # video_url defaults to a fresh URL per call (not a fixed constant) since
+    # Asset.oss_key stores it directly and is unique - reusing one default
+    # across multiple shots in the same test would collide on that constraint.
+    kwargs = dict(VALID_SHOT_RENDER_RESULT_KWARGS)
+    prompt_history_id = overrides.pop("prompt_history_id", None) or uuid4()
+    video_url = overrides.pop(
+        "video_url", f"https://dashscope-result.example.com/videos/{uuid4()}.mp4"
+    )
+    kwargs.update(overrides)
+    return ShotRenderResult(prompt_history_id=prompt_history_id, video_url=video_url, **kwargs)
+
+
+VALID_SHOT_RENDER_FAILURE_KWARGS: dict[str, object] = {
+    "shot_number": 1,
+    "attempts": 3,
+    "error": "Wan video task abc123 timed out after 600.0s",
+}
+
+
+def make_shot_render_failure(**overrides: object) -> ShotRenderFailure:
+    kwargs = dict(VALID_SHOT_RENDER_FAILURE_KWARGS)
+    prompt_history_id = overrides.pop("prompt_history_id", None) or uuid4()
+    kwargs.update(overrides)
+    return ShotRenderFailure(prompt_history_id=prompt_history_id, **kwargs)
+
+
+def make_video_generation_agent_result(**overrides: object) -> VideoGenerationAgentResult:
+    rendered = overrides.pop("rendered", None)
+    if rendered is None:
+        rendered = [make_shot_render_result()]
+    failed = overrides.pop("failed", None)
+    if failed is None:
+        failed = []
+    return VideoGenerationAgentResult(rendered=rendered, failed=failed, **overrides)
+
+
+def make_video_generation_agent_run_result(
+    **overrides: object,
+) -> AgentRunResult[VideoGenerationAgentResult]:
+    defaults: dict[str, object] = {
+        "output": make_video_generation_agent_result(),
+        "model": "wan",
+        "prompt_version": "n/a",
+        "latency_ms": 1616,
+        "attempts": 1,
     }
     defaults.update(overrides)
     return AgentRunResult(**defaults)
