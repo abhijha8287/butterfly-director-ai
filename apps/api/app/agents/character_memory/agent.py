@@ -17,6 +17,7 @@ from app.agents.character_memory.validators import validate_against_roster
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.core.exceptions import AgentOutputInvalidError, ProviderUnavailableError
+from app.integrations.llm_factory import active_model_name, get_llm
 
 logger = get_logger(__name__)
 
@@ -43,14 +44,7 @@ class CharacterMemoryAgent(BaseAgent[CharacterMemoryRequest, CharacterMemoryResu
         self._parser = PydanticOutputParser(pydantic_object=CharacterMemoryResult)
 
     def _build_llm(self) -> ChatOpenAI:
-        if not self._settings.dashscope_api_key:
-            raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
-        return ChatOpenAI(
-            model=self._settings.qwen_model,
-            api_key=self._settings.dashscope_api_key,
-            base_url=f"{self._settings.dashscope_base_url}/compatible-mode/v1",
-            temperature=0.4,
-        )
+        return get_llm(self._settings, temperature=0.4)
 
     def _build_messages(
         self, request: CharacterMemoryRequest, repair_note: str | None
@@ -115,7 +109,7 @@ class CharacterMemoryAgent(BaseAgent[CharacterMemoryRequest, CharacterMemoryResu
             logger.info("character_memory_succeeded", attempt=attempt, latency_ms=latency_ms)
             return AgentRunResult(
                 output=result,
-                model=self._settings.qwen_model,
+                model=active_model_name(self._settings),
                 prompt_version=PROMPT_VERSION,
                 latency_ms=latency_ms,
                 attempts=attempt,

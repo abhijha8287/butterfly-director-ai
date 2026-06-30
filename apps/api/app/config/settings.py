@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     dashscope_ws_base_url: str = Field(default="wss://dashscope-intl.aliyuncs.com")
     dashscope_api_key: str = Field(default="")
 
+    # LLM provider selection — "qwen" uses DashScope's OpenAI-compatible endpoint;
+    # "gemini" uses Google's OpenAI-compatible endpoint at generativelanguage.googleapis.com.
+    # Only the text-generation agents (Story → Prompt Director) are affected.
+    # Voice/Video/Music/Editor providers are selected independently above.
+    llm_provider: Literal["qwen", "gemini"] = Field(default="qwen")
+
+    gemini_api_key: str = Field(default="")
+    gemini_model: str = Field(default="gemini-2.0-flash")
+
     qwen_model: str = Field(default="qwen-plus")
 
     wan_model: str = Field(default="wan2.6-t2v")

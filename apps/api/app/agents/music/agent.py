@@ -25,6 +25,7 @@ from app.agents.music.validators import validate_music_script
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.core.exceptions import AgentOutputInvalidError, ProviderUnavailableError
+from app.integrations.llm_factory import active_model_name, get_llm
 from app.integrations.providers.base import MusicGenerationProvider
 from app.integrations.providers.base import MusicGenerationRequest as ProviderMusicRequest
 from app.integrations.providers.factory import get_music_provider
@@ -64,14 +65,7 @@ class MusicAgent(BaseAgent[MusicRequest, MusicAgentResult]):
         self._provider = provider if provider is not None else get_music_provider(self._settings)
 
     def _build_llm(self) -> ChatOpenAI:
-        if not self._settings.dashscope_api_key:
-            raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
-        return ChatOpenAI(
-            model=self._settings.qwen_model,
-            api_key=self._settings.dashscope_api_key,
-            base_url=f"{self._settings.dashscope_base_url}/compatible-mode/v1",
-            temperature=0.7,
-        )
+        return get_llm(self._settings, temperature=0.7)
 
     def _build_messages(
         self, request: MusicRequest, repair_note: str | None
@@ -179,7 +173,7 @@ class MusicAgent(BaseAgent[MusicRequest, MusicAgentResult]):
         )
         return AgentRunResult(
             output=output,
-            model=self._settings.qwen_model,
+            model=active_model_name(self._settings),
             prompt_version=PROMPT_VERSION,
             latency_ms=latency_ms,
             attempts=extraction_meta["attempts"],

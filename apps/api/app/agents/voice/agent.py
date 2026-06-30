@@ -25,6 +25,7 @@ from app.agents.voice.validators import validate_dialogue_script
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.core.exceptions import AgentOutputInvalidError, ProviderUnavailableError
+from app.integrations.llm_factory import active_model_name, get_llm
 from app.integrations.providers.base import VoiceGenerationProvider
 from app.integrations.providers.base import VoiceGenerationRequest as ProviderVoiceRequest
 from app.integrations.providers.factory import get_voice_provider
@@ -64,14 +65,7 @@ class VoiceAgent(BaseAgent[VoiceRequest, VoiceAgentResult]):
         self._provider = provider or get_voice_provider(self._settings)
 
     def _build_llm(self) -> ChatOpenAI:
-        if not self._settings.dashscope_api_key:
-            raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
-        return ChatOpenAI(
-            model=self._settings.qwen_model,
-            api_key=self._settings.dashscope_api_key,
-            base_url=f"{self._settings.dashscope_base_url}/compatible-mode/v1",
-            temperature=0.6,
-        )
+        return get_llm(self._settings, temperature=0.6)
 
     def _build_messages(
         self, request: VoiceRequest, repair_note: str | None
@@ -164,7 +158,7 @@ class VoiceAgent(BaseAgent[VoiceRequest, VoiceAgentResult]):
         )
         return AgentRunResult(
             output=output,
-            model=self._settings.qwen_model,
+            model=active_model_name(self._settings),
             prompt_version=PROMPT_VERSION,
             latency_ms=latency_ms,
             attempts=extraction_meta["attempts"],

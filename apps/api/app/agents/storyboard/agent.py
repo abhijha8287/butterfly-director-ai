@@ -17,6 +17,7 @@ from app.agents.storyboard.validators import validate_shot_list
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.core.exceptions import AgentOutputInvalidError, ProviderUnavailableError
+from app.integrations.llm_factory import active_model_name, get_llm
 
 logger = get_logger(__name__)
 
@@ -41,14 +42,7 @@ class StoryboardAgent(BaseAgent[StoryboardRequest, StoryboardResult]):
         self._parser = PydanticOutputParser(pydantic_object=StoryboardResult)
 
     def _build_llm(self) -> ChatOpenAI:
-        if not self._settings.dashscope_api_key:
-            raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
-        return ChatOpenAI(
-            model=self._settings.qwen_model,
-            api_key=self._settings.dashscope_api_key,
-            base_url=f"{self._settings.dashscope_base_url}/compatible-mode/v1",
-            temperature=0.7,
-        )
+        return get_llm(self._settings, temperature=0.7)
 
     def _build_messages(
         self, request: StoryboardRequest, repair_note: str | None
@@ -123,7 +117,7 @@ class StoryboardAgent(BaseAgent[StoryboardRequest, StoryboardResult]):
             logger.info("storyboard_succeeded", attempt=attempt, latency_ms=latency_ms)
             return AgentRunResult(
                 output=result,
-                model=self._settings.qwen_model,
+                model=active_model_name(self._settings),
                 prompt_version=PROMPT_VERSION,
                 latency_ms=latency_ms,
                 attempts=attempt,

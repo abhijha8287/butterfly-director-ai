@@ -13,6 +13,7 @@ from app.agents.base.base_agent import BaseAgent
 from app.agents.base.prompt_loader import load_prompt
 from app.agents.character_architect.schema import CharacterRequest, CharacterRoster
 from app.agents.character_architect.validators import validate_against_story_bible
+from app.integrations.llm_factory import active_model_name, get_llm
 from app.config.logging import get_logger
 from app.config.settings import Settings, get_settings
 from app.core.exceptions import AgentOutputInvalidError, ProviderUnavailableError
@@ -40,14 +41,7 @@ class CharacterArchitectAgent(BaseAgent[CharacterRequest, CharacterRoster]):
         self._parser = PydanticOutputParser(pydantic_object=CharacterRoster)
 
     def _build_llm(self) -> ChatOpenAI:
-        if not self._settings.dashscope_api_key:
-            raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
-        return ChatOpenAI(
-            model=self._settings.qwen_model,
-            api_key=self._settings.dashscope_api_key,
-            base_url=f"{self._settings.dashscope_base_url}/compatible-mode/v1",
-            temperature=0.8,
-        )
+        return get_llm(self._settings, temperature=0.8)
 
     def _build_messages(
         self, request: CharacterRequest, repair_note: str | None
@@ -108,7 +102,7 @@ class CharacterArchitectAgent(BaseAgent[CharacterRequest, CharacterRoster]):
             logger.info("character_architect_succeeded", attempt=attempt, latency_ms=latency_ms)
             return AgentRunResult(
                 output=roster,
-                model=self._settings.qwen_model,
+                model=active_model_name(self._settings),
                 prompt_version=PROMPT_VERSION,
                 latency_ms=latency_ms,
                 attempts=attempt,
