@@ -1,0 +1,19 @@
+# Copy this to terraform.tfvars and fill in the secrets.
+# NEVER commit terraform.tfvars to git (it's already in .gitignore).
+
+aws_region  = "us-east-1"
+environment = "staging"
+
+# Database
+db_password = "change-me-to-a-strong-password"
+
+# App
+secret_key = "change-me-to-a-random-64-char-string"
+
+# AI providers — set at least one of these
+gemini_api_key    = ""          # get from https://aistudio.google.com/apikey
+dashscope_api_key = ""          # get from DashScope console (needed for Wan video + CosyVoice)
+
+# LLM selection
+llm_provider = "gemini"
+gemini_model = "gemini-2.0-flash"
