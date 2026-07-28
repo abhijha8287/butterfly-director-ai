@@ -28,21 +28,28 @@ export const api = {
     style?: string;
   }) => apiClient.post("/projects", data),
 
-  // Story Architect Agent
   triggerStoryArchitect: (projectId: string) =>
     apiClient.post(`/projects/${projectId}/agents/story-architect`),
-
-  // Character Architect Agent
   triggerCharacterArchitect: (projectId: string) =>
     apiClient.post(`/projects/${projectId}/agents/character-architect`),
-
-  // Decision Detector Agent
   triggerDecisionDetector: (projectId: string) =>
     apiClient.post(`/projects/${projectId}/agents/decision-detector`),
-
-  // Timeline Generator Agent
   triggerTimelineGenerator: (projectId: string) =>
     apiClient.post(`/projects/${projectId}/agents/timeline-generator`),
+  triggerCharacterMemory: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/character-memory`),
+  triggerStoryboard: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/storyboard`),
+  triggerPromptDirector: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/prompt-director`),
+  triggerVideoGeneration: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/video-generation`),
+  triggerVoice: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/voice`),
+  triggerMusic: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/music`),
+  triggerEditor: (projectId: string) =>
+    apiClient.post(`/projects/${projectId}/agents/editor`),
 
   // Get agent status
   getAgentStatus: (projectId: string, agentName: string) =>

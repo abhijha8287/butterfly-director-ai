@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: '/api/v1/:path*',
+          destination: 'http://api:8000/v1/:path*',
+        },
+      ],
+    };
+  },
 };
 
 export default nextConfig;

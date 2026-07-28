@@ -83,6 +83,13 @@ export default function ProjectDetailPage() {
         "character-architect": () => api.triggerCharacterArchitect(projectId),
         "decision-detector": () => api.triggerDecisionDetector(projectId),
         "timeline-generator": () => api.triggerTimelineGenerator(projectId),
+        "character-memory": () => api.triggerCharacterMemory(projectId),
+        "storyboard": () => api.triggerStoryboard(projectId),
+        "prompt-director": () => api.triggerPromptDirector(projectId),
+        "video-generation": () => api.triggerVideoGeneration(projectId),
+        "voice": () => api.triggerVoice(projectId),
+        "music": () => api.triggerMusic(projectId),
+        "editor": () => api.triggerEditor(projectId),
       };
 
       if (triggerMap[agentId]) {
@@ -210,9 +217,7 @@ export default function ProjectDetailPage() {
                   </span>
                 </div>
 
-                {["story-architect", "character-architect", "decision-detector", "timeline-generator"].includes(
-                  agent.id
-                ) && (
+                {(
                   <button
                     onClick={() => handleTriggerAgent(agent.id)}
                     disabled={agentStatuses[agent.id] === "running"}

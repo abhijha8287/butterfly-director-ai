@@ -103,6 +103,7 @@ locals {
     { name = "CELERY_RESULT_BACKEND",  value = "${local.redis_url}/2" },
     { name = "MEDIA_ROOT",             value = "/app/media" },
     { name = "LLM_PROVIDER",           value = var.llm_provider },
+    { name = "QWEN_MODEL",             value = var.qwen_model },
     { name = "GEMINI_MODEL",           value = var.gemini_model },
     { name = "DASHSCOPE_BASE_URL",     value = "https://dashscope-intl.aliyuncs.com" },
     { name = "DASHSCOPE_WS_BASE_URL",  value = "wss://dashscope-intl.aliyuncs.com" },

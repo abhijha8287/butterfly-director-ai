@@ -54,10 +54,13 @@ class Settings(BaseSettings):
     # "gemini" uses Google's OpenAI-compatible endpoint at generativelanguage.googleapis.com.
     # Only the text-generation agents (Story → Prompt Director) are affected.
     # Voice/Video/Music/Editor providers are selected independently above.
-    llm_provider: Literal["qwen", "gemini"] = Field(default="qwen")
+    llm_provider: Literal["qwen", "gemini", "groq"] = Field(default="qwen")
 
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-2.0-flash")
+
+    groq_api_key: str = Field(default="")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
 
     qwen_model: str = Field(default="qwen-plus")
 
@@ -71,8 +74,8 @@ class Settings(BaseSettings):
     # Strategy-pattern provider selection - business logic never depends on a vendor
     # directly, only on the VideoGenerationProvider / VoiceGenerationProvider /
     # MusicGenerationProvider interfaces in app/integrations/providers/base.py.
-    video_provider: Literal["wan", "happyhorse"] = Field(default="wan")
-    voice_provider: Literal["dashscope", "happyhorse"] = Field(default="dashscope")
+    video_provider: Literal["wan", "happyhorse", "mock"] = Field(default="wan")
+    voice_provider: Literal["dashscope", "happyhorse", "mock"] = Field(default="dashscope")
     music_provider: Literal["happyhorse", "none"] = Field(default="none")
 
     # HappyHorseProvider is a generic, vendor-agnostic adapter - isolated HTTP details

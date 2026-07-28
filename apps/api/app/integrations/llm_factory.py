@@ -6,10 +6,20 @@ from app.config.settings import Settings, get_settings
 from app.core.exceptions import ProviderUnavailableError
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
 def get_llm(settings: Settings | None = None, *, temperature: float = 0.7) -> ChatOpenAI:
     settings = settings or get_settings()
+    if settings.llm_provider == "groq":
+        if not settings.groq_api_key:
+            raise ProviderUnavailableError("GROQ_API_KEY is not configured")
+        return ChatOpenAI(
+            model=settings.groq_model,
+            api_key=settings.groq_api_key,
+            base_url=_GROQ_BASE_URL,
+            temperature=temperature,
+        )
     if settings.llm_provider == "gemini":
         if not settings.gemini_api_key:
             raise ProviderUnavailableError("GEMINI_API_KEY is not configured")
@@ -31,4 +41,6 @@ def get_llm(settings: Settings | None = None, *, temperature: float = 0.7) -> Ch
 
 def active_model_name(settings: Settings | None = None) -> str:
     settings = settings or get_settings()
+    if settings.llm_provider == "groq":
+        return settings.groq_model
     return settings.gemini_model if settings.llm_provider == "gemini" else settings.qwen_model

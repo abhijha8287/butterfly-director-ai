@@ -94,7 +94,13 @@ variable "gemini_api_key" {
 variable "llm_provider" {
   description = "LLM provider: qwen or gemini"
   type        = string
-  default     = "gemini"
+  default     = "qwen"
+}
+
+variable "qwen_model" {
+  description = "Qwen model name (used when llm_provider=qwen)"
+  type        = string
+  default     = "qwen-plus"
 }
 
 variable "gemini_model" {

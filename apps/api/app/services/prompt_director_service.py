@@ -35,6 +35,7 @@ logger = get_logger(__name__)
 _VIDEO_PROVIDER_TO_PROMPT_PROVIDER = {
     "wan": PromptProvider.WAN,
     "happyhorse": PromptProvider.HAPPYHORSE,
+    "mock": PromptProvider.WAN,
 }
 
 

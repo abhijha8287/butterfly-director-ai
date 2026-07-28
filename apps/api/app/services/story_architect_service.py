@@ -30,7 +30,7 @@ class StoryArchitectService:
         self.agent_log_repo = AgentLogRepository(session)
         self.agent = StoryArchitectAgent()
 
-    async def generate(self, request: StoryRequest) -> StoryGenerateResponse:
+    async def generate(self, request: StoryRequest, project_id: UUID | None = None) -> StoryGenerateResponse:
         try:
             result = await self.agent.run(request)
         except Exception as exc:
@@ -57,7 +57,7 @@ class StoryArchitectService:
         }
 
         story = await self.story_repo.create(
-            project_id=None,
+            project_id=project_id,
             premise=request.prompt,
             genre=story_bible.genre,
             tone=story_bible.tone,

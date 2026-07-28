@@ -10,11 +10,14 @@ from app.integrations.providers.base import (
 from app.integrations.providers.dashscope_tts_provider import DashScopeTTSProvider
 from app.integrations.providers.ffmpeg_editor_provider import FfmpegEditorComposeProvider
 from app.integrations.providers.happyhorse_provider import HappyHorseProvider
+from app.integrations.providers.mock_provider import MockEditorComposeProvider, MockMusicProvider, MockVideoProvider, MockVoiceProvider
 from app.integrations.providers.wan_video_provider import WanVideoProvider
 
 
 def get_video_provider(settings: Settings | None = None) -> VideoGenerationProvider:
     settings = settings or get_settings()
+    if settings.video_provider == "mock":
+        return MockVideoProvider()
     if settings.video_provider == "wan":
         return WanVideoProvider(settings)
     if settings.video_provider == "happyhorse":
@@ -24,6 +27,8 @@ def get_video_provider(settings: Settings | None = None) -> VideoGenerationProvi
 
 def get_voice_provider(settings: Settings | None = None) -> VoiceGenerationProvider:
     settings = settings or get_settings()
+    if settings.voice_provider == "mock":
+        return MockVoiceProvider()
     if settings.voice_provider == "dashscope":
         return DashScopeTTSProvider(settings)
     if settings.voice_provider == "happyhorse":
@@ -41,4 +46,7 @@ def get_music_provider(settings: Settings | None = None) -> MusicGenerationProvi
 
 
 def get_editor_provider(settings: Settings | None = None) -> EditorComposeProvider:
-    return FfmpegEditorComposeProvider(settings or get_settings())
+    settings = settings or get_settings()
+    if settings.video_provider == "mock":
+        return MockEditorComposeProvider()
+    return FfmpegEditorComposeProvider(settings)

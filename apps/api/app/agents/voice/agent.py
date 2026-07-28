@@ -29,6 +29,7 @@ from app.integrations.llm_factory import active_model_name, get_llm
 from app.integrations.providers.base import VoiceGenerationProvider
 from app.integrations.providers.base import VoiceGenerationRequest as ProviderVoiceRequest
 from app.integrations.providers.factory import get_voice_provider
+from app.agents.base.text_utils import strip_thinking_tags
 
 logger = get_logger(__name__)
 
@@ -106,7 +107,7 @@ class VoiceAgent(BaseAgent[VoiceRequest, VoiceAgentResult]):
         for attempt in range(1, MAX_ATTEMPTS + 1):
             messages = self._build_messages(request, repair_note)
             ai_message = await llm.ainvoke(messages)
-            last_raw_text = str(ai_message.content)
+            last_raw_text = strip_thinking_tags(str(ai_message.content))
 
             usage = getattr(ai_message, "usage_metadata", None) or {}
             prompt_tokens = usage.get("input_tokens", prompt_tokens)

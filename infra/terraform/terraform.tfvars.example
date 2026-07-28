@@ -10,10 +10,11 @@ db_password = "change-me-to-a-strong-password"
 # App
 secret_key = "change-me-to-a-random-64-char-string"
 
-# AI providers — set at least one of these
-gemini_api_key    = ""          # get from https://aistudio.google.com/apikey
-dashscope_api_key = ""          # get from DashScope console (needed for Wan video + CosyVoice)
+# AI providers
+dashscope_api_key = ""          # get from https://dashscope-intl.aliyuncs.com — required for LLM + Wan video + CosyVoice
+gemini_api_key    = ""          # optional — get from https://aistudio.google.com/apikey
 
-# LLM selection
-llm_provider = "gemini"
+# LLM selection (qwen uses dashscope_api_key; gemini uses gemini_api_key)
+llm_provider = "qwen"
+qwen_model   = "qwen-plus"
 gemini_model = "gemini-2.0-flash"
