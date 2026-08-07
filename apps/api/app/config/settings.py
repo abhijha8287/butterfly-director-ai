@@ -51,16 +51,20 @@ class Settings(BaseSettings):
     dashscope_api_key: str = Field(default="")
 
     # LLM provider selection — "qwen" uses DashScope's OpenAI-compatible endpoint;
-    # "gemini" uses Google's OpenAI-compatible endpoint at generativelanguage.googleapis.com.
+    # "gemini" uses Google's OpenAI-compatible endpoint at generativelanguage.googleapis.com;
+    # "openai" uses OpenAI's own API directly.
     # Only the text-generation agents (Story → Prompt Director) are affected.
     # Voice/Video/Music/Editor providers are selected independently above.
-    llm_provider: Literal["qwen", "gemini", "groq"] = Field(default="qwen")
+    llm_provider: Literal["qwen", "gemini", "groq", "openai"] = Field(default="qwen")
 
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-2.0-flash")
 
     groq_api_key: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
+
+    openai_api_key: str = Field(default="")
+    openai_model: str = Field(default="gpt-4o-mini")
 
     qwen_model: str = Field(default="qwen-plus")
 

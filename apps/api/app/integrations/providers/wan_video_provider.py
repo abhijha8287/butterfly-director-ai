@@ -80,35 +80,43 @@ class WanVideoProvider(VideoGenerationProvider):
         if not self._api_key:
             raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=60.0) as client:
-            task_id = await self._create_task(client, request)
-            logger.info("wan_video_task_created", task_id=task_id)
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=60.0) as client:
+                task_id = await self._create_task(client, request)
+                logger.info("wan_video_task_created", task_id=task_id)
 
-            deadline = time.monotonic() + self._settings.provider_poll_timeout_seconds
-            while True:
-                payload = await self._poll_task(client, task_id)
-                status = payload["output"]["task_status"]
+                deadline = time.monotonic() + self._settings.provider_poll_timeout_seconds
+                while True:
+                    payload = await self._poll_task(client, task_id)
+                    status = payload["output"]["task_status"]
 
-                if status == "SUCCEEDED":
-                    logger.info("wan_video_task_succeeded", task_id=task_id)
-                    return VideoGenerationResult(
-                        video_url=payload["output"]["video_url"],
-                        duration_seconds=request.duration_seconds
-                        or self._settings.wan_video_duration_seconds,
-                        provider="wan",
-                        raw_response=payload,
-                    )
+                    if status == "SUCCEEDED":
+                        logger.info("wan_video_task_succeeded", task_id=task_id)
+                        return VideoGenerationResult(
+                            video_url=payload["output"]["video_url"],
+                            duration_seconds=request.duration_seconds
+                            or self._settings.wan_video_duration_seconds,
+                            provider="wan",
+                            raw_response=payload,
+                        )
 
-                if status in ("FAILED", "CANCELED", "UNKNOWN"):
-                    raise ProviderUnavailableError(
-                        f"Wan video task {task_id} ended with status {status}",
-                        details={"raw_response": payload},
-                    )
+                    if status in ("FAILED", "CANCELED", "UNKNOWN"):
+                        raise ProviderUnavailableError(
+                            f"Wan video task {task_id} ended with status {status}",
+                            details={"raw_response": payload},
+                        )
 
-                if time.monotonic() > deadline:
-                    raise ProviderUnavailableError(
-                        f"Wan video task {task_id} timed out after "
-                        f"{self._settings.provider_poll_timeout_seconds}s"
-                    )
+                    if time.monotonic() > deadline:
+                        raise ProviderUnavailableError(
+                            f"Wan video task {task_id} timed out after "
+                            f"{self._settings.provider_poll_timeout_seconds}s"
+                        )
 
-                await asyncio.sleep(self._settings.provider_poll_interval_seconds)
+                    await asyncio.sleep(self._settings.provider_poll_interval_seconds)
+        except httpx.HTTPStatusError as exc:
+            raise ProviderUnavailableError(
+                f"Wan video request failed: {exc.response.status_code} {exc.response.text[:300]}",
+                details={"status_code": exc.response.status_code},
+            ) from exc
+        except httpx.TransportError as exc:
+            raise ProviderUnavailableError(f"Wan video request failed: {exc}") from exc

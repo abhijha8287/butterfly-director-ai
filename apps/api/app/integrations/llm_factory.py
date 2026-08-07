@@ -29,6 +29,14 @@ def get_llm(settings: Settings | None = None, *, temperature: float = 0.7) -> Ch
             base_url=_GEMINI_BASE_URL,
             temperature=temperature,
         )
+    if settings.llm_provider == "openai":
+        if not settings.openai_api_key:
+            raise ProviderUnavailableError("OPENAI_API_KEY is not configured")
+        return ChatOpenAI(
+            model=settings.openai_model,
+            api_key=settings.openai_api_key,
+            temperature=temperature,
+        )
     if not settings.dashscope_api_key:
         raise ProviderUnavailableError("DASHSCOPE_API_KEY is not configured")
     return ChatOpenAI(
@@ -43,4 +51,6 @@ def active_model_name(settings: Settings | None = None) -> str:
     settings = settings or get_settings()
     if settings.llm_provider == "groq":
         return settings.groq_model
+    if settings.llm_provider == "openai":
+        return settings.openai_model
     return settings.gemini_model if settings.llm_provider == "gemini" else settings.qwen_model

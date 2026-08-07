@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
 import { AgentStatus } from "@/components/AgentStatus";
 import { TimelineVisualizer } from "@/components/TimelineVisualizer";
+import { ProjectResults } from "@/components/ProjectResults";
 import { ArrowLeft, Sparkles, Loader } from "lucide-react";
 
 const AGENTS = [
@@ -151,7 +152,9 @@ export default function ProjectDetailPage() {
 
         <div className="flex flex-wrap gap-4 text-sm text-gray-600">
           {currentProject.genre && <span>📌 {currentProject.genre}</span>}
-          <span>⏱️ {currentProject.target_runtime_seconds}s</span>
+          {typeof currentProject.settings?.target_runtime_seconds === "number" && (
+            <span>⏱️ {currentProject.settings.target_runtime_seconds as number}s</span>
+          )}
           <span>📅 {new Date(currentProject.created_at).toLocaleDateString()}</span>
         </div>
       </div>
@@ -184,6 +187,16 @@ export default function ProjectDetailPage() {
           }`}
         >
           Story Timeline
+        </button>
+        <button
+          onClick={() => setActiveTab("results")}
+          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
+            activeTab === "results"
+              ? "border-blue-600 text-blue-600"
+              : "border-transparent text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          Results
         </button>
       </div>
 
@@ -249,6 +262,9 @@ export default function ProjectDetailPage() {
           )}
         </div>
       )}
+
+      {/* Results Tab */}
+      {activeTab === "results" && <ProjectResults projectId={projectId} />}
     </div>
   );
 }

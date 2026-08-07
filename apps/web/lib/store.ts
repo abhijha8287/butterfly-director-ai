@@ -4,21 +4,29 @@ export interface Project {
   id: string;
   title: string;
   premise: string;
-  target_runtime_seconds: number;
-  genre?: string;
-  style?: string;
+  genre?: string | null;
+  tone?: string | null;
+  status: "draft" | "generating" | "ready" | "archived";
+  settings: Record<string, unknown>;
+  owner_id?: string | null;
   created_at: string;
   updated_at: string;
-  status: "draft" | "processing" | "completed" | "failed";
 }
 
 export interface Branch {
   id: string;
-  project_id: string;
-  parent_id?: string;
-  decision_text: string;
-  branch_option: string;
-  depth_level: number;
+  timeline_id: string;
+  parent_branch_id?: string | null;
+  name: string;
+  summary?: string | null;
+  decision_summary?: Record<string, unknown> | null;
+  depth: number;
+  status: "pending" | "producing" | "completed" | "failed" | "pruned";
+  is_canonical: boolean;
+  butterfly_score?: number | null;
+  probability?: string | null;
+  confidence_score?: string | null;
+  stability_explanation?: string | null;
   created_at: string;
 }
 

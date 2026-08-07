@@ -41,6 +41,7 @@ logger = get_logger(__name__)
 _VOICE_PROVIDER_TO_PROMPT_PROVIDER = {
     "dashscope": PromptProvider.DASHSCOPE,
     "happyhorse": PromptProvider.HAPPYHORSE,
+    "mock": PromptProvider.DASHSCOPE,
 }
 
 
